@@ -394,13 +394,65 @@ internal class DependencyAdderSpec {
 
   @Nested inner class `when the dependency is already declared` {
 
-    @Disabled("pending") @Test fun `skips a dependency already declared with the same version`() {}
+    private val buildScript =
+      """
+        dependencies {
+          implementation("com.squareup.okio:okio:3.9.0")
+          implementation(libs.picocli)
+        }
+      """.trimIndent()
 
-    @Disabled("pending") @Test fun `skips a dependency already declared with a different version`() {}
+    @Test fun `skips a dependency already declared with the same version`() {
+      // When
+      val okio = Addition("implementation", StringLiteral("com.squareup.okio:okio:3.9.0"))
+      val adder = DependencyAdder.of(buildScript, listOf(okio))
 
-    @Disabled("pending") @Test fun `still adds the same coordinates on a different configuration`() {}
+      // Then
+      assertThat(adder.isChanged()).isFalse()
+      assertThat(adder.skipped()).containsExactly(okio)
+      assertThat(adder.rewritten()).isEqualTo(buildScript)
+    }
 
-    @Disabled("pending") @Test fun `recognises an already declared version catalog accessor`() {}
+    @Test fun `skips a dependency already declared with a different version`() {
+      // When asked for a newer okio than the one declared
+      val newerOkio = Addition("implementation", StringLiteral("com.squareup.okio:okio:3.10.0"))
+      val adder = DependencyAdder.of(buildScript, listOf(newerOkio))
+
+      // Then it is skipped, and the declared version is left alone
+      assertThat(adder.isChanged()).isFalse()
+      assertThat(adder.skipped()).containsExactly(newerOkio)
+      assertThat(adder.rewritten()).isEqualTo(buildScript)
+    }
+
+    @Test fun `still adds the same coordinates on a different configuration`() {
+      // When okio is also asked for on testImplementation
+      val adder = DependencyAdder.of(
+        buildScript,
+        listOf(Addition("testImplementation", StringLiteral("com.squareup.okio:okio:3.9.0"))),
+      )
+
+      // Then it is added
+      assertThat(adder.rewritten()).isEqualTo(
+        """
+          dependencies {
+            implementation("com.squareup.okio:okio:3.9.0")
+            implementation(libs.picocli)
+            testImplementation("com.squareup.okio:okio:3.9.0")
+          }
+        """.trimIndent()
+      )
+    }
+
+    @Test fun `recognises an already declared version catalog accessor`() {
+      // When
+      val picocli = Addition("implementation", Accessor("libs.picocli"))
+      val adder = DependencyAdder.of(buildScript, listOf(picocli))
+
+      // Then
+      assertThat(adder.isChanged()).isFalse()
+      assertThat(adder.skipped()).containsExactly(picocli)
+      assertThat(adder.usedAccessors()).isEmpty()
+    }
   }
 
   @Nested inner class `reporting what changed` {
