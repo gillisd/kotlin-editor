@@ -21,8 +21,9 @@ import java.nio.file.Path
  * Adds dependency declarations to the top-level `dependencies` block of a build script.
  *
  * A new declaration goes on the line after the last declaration with the same configuration, or after the block's
- * last statement when there is none. A dependency that is already declared on the same configuration (with any
- * version) is skipped, not changed: use [DependenciesMutator] to change existing declarations.
+ * last statement when there is none. A script without a top-level `dependencies` block gets one after its
+ * `repositories` block, else after `plugins`, else at the end. A dependency that is already declared on the same
+ * configuration (with any version) is skipped, not changed: use [DependenciesMutator] to change existing declarations.
  */
 public class DependencyAdder private constructor(
   private val additions: List<Addition>,
@@ -57,6 +58,10 @@ public class DependencyAdder private constructor(
   private val skipped = mutableListOf<Addition>()
   private var handledBlock = false
 
+  // Where a new dependencies block goes when the script has none.
+  private var pluginsBlock: NamedBlockContext? = null
+  private var repositoriesBlock: NamedBlockContext? = null
+
   /** The additions that were inserted, in the order given. */
   public fun added(): List<Addition> = added.toList()
 
@@ -74,21 +79,38 @@ public class DependencyAdder private constructor(
   }
 
   override fun exitNamedBlock(ctx: NamedBlockContext) {
-    if (!handledBlock && isTopLevelDependencies(ctx)) {
-      handledBlock = true
-      addTo(ctx)
+    // The parent is a StatementContext whose parent is the script. A block nested inside
+    // `buildscript { }` or a task has a StatementsContext there instead.
+    if (ctx.parent.parent is ScriptContext) {
+      when {
+        ctx.isDependencies && !handledBlock -> {
+          handledBlock = true
+          addTo(ctx)
+        }
+        ctx.name().text == "plugins" -> pluginsBlock = ctx
+        ctx.name().text == "repositories" -> repositoriesBlock = ctx
+      }
     }
     dependencyExtractor.onExitBlock()
   }
 
-  // The parent is a StatementContext whose parent is the script. A `dependencies` block nested inside
-  // `buildscript { }` or a task has a StatementsContext there instead.
-  private fun isTopLevelDependencies(ctx: NamedBlockContext): Boolean =
-    ctx.parent.parent is ScriptContext && ctx.isDependencies
+  override fun exitScript(ctx: ScriptContext) {
+    if (!handledBlock) addNewBlock(ctx)
+  }
+
+  /** Records each addition as added or skipped (already in [present]), and returns the ones to insert. */
+  private fun selectNew(present: MutableSet<String>): List<Addition> {
+    val toAdd = mutableListOf<Addition>()
+    for (addition in additions) {
+      if (present.add(addition.key())) toAdd += addition else skipped += addition
+    }
+    added += toAdd
+    return toAdd
+  }
 
   private fun addTo(block: NamedBlockContext) {
     val existing = dependencyExtractor.collectDependencies(block).getDependencyDeclarationsWithContext()
-    val present = existing.mapTo(mutableSetOf()) { it.declaration.key() }
+    val toAdd = selectNew(existing.mapTo(mutableSetOf()) { it.declaration.key() })
     val lastStatement = block.statements()?.statement()?.lastOrNull()
 
     // Lines are grouped by where they go and inserted once per spot: the rewriter would reverse several
@@ -96,13 +118,7 @@ public class DependencyAdder private constructor(
     val linesAfter = LinkedHashMap<Token, MutableList<String>>()
     val linesInEmptyBlock = mutableListOf<String>()
 
-    for (addition in additions) {
-      if (!present.add(addition.key())) {
-        skipped += addition
-        continue
-      }
-      added += addition
-
+    for (addition in toAdd) {
       val anchor = existing.lastOrNull { it.declaration.configuration == addition.configuration }?.statement
         ?: lastStatement
       if (anchor == null) {
@@ -117,6 +133,25 @@ public class DependencyAdder private constructor(
     }
     if (linesInEmptyBlock.isNotEmpty()) {
       insertIntoEmptyBlock(block, linesInEmptyBlock)
+    }
+  }
+
+  /**
+   * Inserts a new `dependencies` block after the top-level `repositories` block, else after `plugins`, else after the
+   * script's last statement, separated by a blank line.
+   */
+  private fun addNewBlock(script: ScriptContext) {
+    val toAdd = selectNew(mutableSetOf())
+    if (toAdd.isEmpty()) return
+
+    val block = "dependencies {\n" + toAdd.joinToString(separator = "") { "$indent${it.render()}\n" } + "}"
+    val anchor = (repositoriesBlock ?: pluginsBlock)?.stop ?: script.statement().lastOrNull()?.stop
+
+    if (anchor == null) {
+      // Nothing else in the script.
+      rewriter.insertBefore(script.start, "$block\n")
+    } else {
+      rewriter.insertBefore(endOfLine(anchor), "\n\n$block")
     }
   }
 

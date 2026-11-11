@@ -387,9 +387,89 @@ internal class DependencyAdderSpec {
 
   @Nested inner class `when the script has no dependencies block` {
 
-    @Disabled("pending") @Test fun `creates a dependencies block at the end of the script`() {}
+    @Test fun `creates a dependencies block at the end of the script`() {
+      // Given a script with neither plugins nor repositories blocks
+      val buildScript =
+        """
+          group = "com.example"
+          version = "1.0"
 
-    @Disabled("pending") @Test fun `creates the block after the plugins and repositories blocks`() {}
+          java {
+            withSourcesJar()
+          }
+        """.trimIndent()
+
+      // When
+      val adder = DependencyAdder.of(
+        buildScript,
+        listOf(
+          Addition("implementation", StringLiteral("com.squareup.okio:okio:3.9.0")),
+          Addition("testImplementation", Accessor("libs.junit.jupiter")),
+        ),
+      )
+
+      // Then
+      assertThat(adder.rewritten()).isEqualTo(
+        """
+          group = "com.example"
+          version = "1.0"
+
+          java {
+            withSourcesJar()
+          }
+
+          dependencies {
+            implementation("com.squareup.okio:okio:3.9.0")
+            testImplementation(libs.junit.jupiter)
+          }
+        """.trimIndent()
+      )
+    }
+
+    @Test fun `creates the block after the plugins and repositories blocks`() {
+      // Given plugins and repositories blocks followed by other configuration
+      val buildScript =
+        """
+          plugins {
+            id("java-library")
+          }
+
+          repositories {
+            mavenCentral()
+          }
+
+          java {
+            withSourcesJar()
+          }
+        """.trimIndent()
+
+      // When
+      val adder = DependencyAdder.of(
+        buildScript,
+        listOf(Addition("implementation", StringLiteral("com.squareup.okio:okio:3.9.0"))),
+      )
+
+      // Then the new block sits right after repositories
+      assertThat(adder.rewritten()).isEqualTo(
+        """
+          plugins {
+            id("java-library")
+          }
+
+          repositories {
+            mavenCentral()
+          }
+
+          dependencies {
+            implementation("com.squareup.okio:okio:3.9.0")
+          }
+
+          java {
+            withSourcesJar()
+          }
+        """.trimIndent()
+      )
+    }
   }
 
   @Nested inner class `when the dependency is already declared` {
