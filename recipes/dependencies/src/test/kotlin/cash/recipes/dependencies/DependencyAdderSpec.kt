@@ -310,11 +310,11 @@ internal class DependencyAdderSpec {
               exclude(group = "org.slf4j")
             }
 
-            testImplementation(  "org.junit.jupiter:junit-jupiter:5.11.0"  )
+            testImplementation(  "org.junit.jupiter:junit-jupiter:5.11.0"  ) // tests
           }
         """.trimIndent()
 
-      // When one is added after the lambda and one after the end-of-line comment's neighbour
+      // When one is added after the lambda and one after a line ending in a comment
       val adder = DependencyAdder.of(
         buildScript,
         listOf(
@@ -333,7 +333,7 @@ internal class DependencyAdderSpec {
             }
             implementation("com.squareup.okhttp3:okhttp:5.5.1")
 
-            testImplementation(  "org.junit.jupiter:junit-jupiter:5.11.0"  )
+            testImplementation(  "org.junit.jupiter:junit-jupiter:5.11.0"  ) // tests
             testImplementation("org.assertj:assertj-core:3.27.7")
           }
         """.trimIndent()
