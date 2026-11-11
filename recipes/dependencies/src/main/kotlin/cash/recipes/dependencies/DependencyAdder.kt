@@ -191,11 +191,45 @@ public class DependencyAdder private constructor(
 
     private fun DependencyDeclaration.key(): String = key(configuration, capability, identifier.path)
 
+    private val coordinatesPattern = Regex("""[^\s:"]+:[^\s:"]+(:[^\s:"]+)?""")
+    private val accessorPattern = Regex("""[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)+""")
+    private val configurationPattern = Regex("""[A-Za-z_][A-Za-z0-9_]*""")
+
+    /**
+     * Rejects additions that would write an invalid declaration, and pairs of additions that ask for the same dependency
+     * with different versions (an exact repeat is fine: the second is reported as skipped).
+     */
+    private fun validate(additions: List<Addition>) {
+      for (addition in additions) {
+        require(configurationPattern.matches(addition.configuration)) {
+          "Invalid configuration name: '${addition.configuration}'"
+        }
+        when (val dependency = addition.dependency) {
+          is Transform.Element.StringLiteral -> require(coordinatesPattern.matches(dependency.value)) {
+            "Invalid coordinates: '${dependency.value}'. Expected 'group:name' or 'group:name:version'."
+          }
+          is Transform.Element.Accessor -> require(accessorPattern.matches(dependency.value)) {
+            "Invalid accessor: '${dependency.value}'. Expected something like 'libs.foo.bar'."
+          }
+        }
+      }
+
+      additions.groupBy { it.key() }.values
+        .filter { sameDependency -> sameDependency.map { it.render() }.distinct().size > 1 }
+        .forEach { conflicting ->
+          throw IllegalArgumentException(
+            "Conflicting additions for the same dependency: ${conflicting.joinToString { it.render() }}"
+          )
+        }
+    }
+
     /**
      * Returns a [DependencyAdder], which eagerly parses [buildScript].
      *
+     * @throws IllegalArgumentException if an addition is malformed (configuration, coordinates or accessor), if two
+     *   additions ask for the same dependency with different versions, or if [DependencyExtractor] sees an expression
+     *   it doesn't understand.
      * @throws IllegalStateException if [DependencyExtractor] sees an expression it doesn't understand.
-     * @throws IllegalArgumentException if [DependencyExtractor] sees an expression it doesn't understand.
      */
     @JvmStatic
     @Throws(IllegalStateException::class, IllegalArgumentException::class)
@@ -205,8 +239,10 @@ public class DependencyAdder private constructor(
     /**
      * Returns a [DependencyAdder], which eagerly parses [buildScript].
      *
+     * @throws IllegalArgumentException if an addition is malformed (configuration, coordinates or accessor), if two
+     *   additions ask for the same dependency with different versions, or if [DependencyExtractor] sees an expression
+     *   it doesn't understand.
      * @throws IllegalStateException if [DependencyExtractor] sees an expression it doesn't understand.
-     * @throws IllegalArgumentException if [DependencyExtractor] sees an expression it doesn't understand.
      */
     @JvmStatic
     @Throws(IllegalStateException::class, IllegalArgumentException::class)
@@ -214,6 +250,7 @@ public class DependencyAdder private constructor(
       of(buildScript.byteInputStream(), additions)
 
     private fun of(buildScript: InputStream, additions: List<Addition>): DependencyAdder {
+      validate(additions)
       val errorListener = CollectingErrorListener()
       return Parser(
         file = buildScript,

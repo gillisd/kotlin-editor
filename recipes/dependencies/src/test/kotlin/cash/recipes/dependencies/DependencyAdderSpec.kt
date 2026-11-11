@@ -1,15 +1,15 @@
 package cash.recipes.dependencies
 
 import cash.grammar.kotlindsl.model.DependencyDeclaration.Capability
+import cash.grammar.kotlindsl.parse.KotlinParseException
 import cash.recipes.dependencies.DependencyAdder.Addition
 import cash.recipes.dependencies.transform.Transform.Element.Accessor
 import cash.recipes.dependencies.transform.Transform.Element.StringLiteral
 import org.assertj.core.api.Assertions.assertThat
-import org.junit.jupiter.api.Disabled
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
 
-// Each spec stays @Disabled("pending") until it is written; remove the marker as it is filled in.
 internal class DependencyAdderSpec {
 
   @Nested inner class `adding to an existing dependencies block` {
@@ -611,10 +611,48 @@ internal class DependencyAdderSpec {
 
   @Nested inner class `rejecting bad input` {
 
-    @Disabled("pending") @Test fun `throws when the script does not parse`() {}
+    private val okio = Addition("implementation", StringLiteral("com.squareup.okio:okio:3.9.0"))
 
-    @Disabled("pending") @Test fun `throws when coordinates are not group-colon-name with an optional version`() {}
+    @Test fun `throws when the script does not parse`() {
+      // Given a script with an unclosed call
+      val buildScript =
+        """
+          dependencies {
+            implementation("com.squareup.okhttp3:okhttp:5.5.1"
+          }
+        """.trimIndent()
 
-    @Disabled("pending") @Test fun `throws when the same dependency is requested twice with different versions`() {}
+      // Then the parse errors surface when the result is asked for
+      assertThatThrownBy { DependencyAdder.of(buildScript, listOf(okio)).rewritten() }
+        .isInstanceOf(KotlinParseException::class.java)
+    }
+
+    @Test fun `throws when coordinates are not group-colon-name with an optional version`() {
+      val buildScript = "dependencies {}"
+
+      listOf("okio", "com.squareup.okio:okio:3.9.0:extra", "com.squareup okio:okio", "", "a:\"b\"").forEach { bad ->
+        assertThatThrownBy { DependencyAdder.of(buildScript, listOf(Addition("implementation", StringLiteral(bad)))) }
+          .describedAs("coordinates '%s'", bad)
+          .isInstanceOf(IllegalArgumentException::class.java)
+          .hasMessageContaining("Invalid coordinates")
+      }
+    }
+
+    @Test fun `throws when the same dependency is requested twice with different versions`() {
+      val buildScript = "dependencies {}"
+      val okioNewer = Addition("implementation", StringLiteral("com.squareup.okio:okio:3.10.0"))
+
+      // Then a conflict is rejected...
+      assertThatThrownBy { DependencyAdder.of(buildScript, listOf(okio, okioNewer)) }
+        .isInstanceOf(IllegalArgumentException::class.java)
+        .hasMessageContaining("Conflicting additions")
+        .hasMessageContaining("3.9.0")
+        .hasMessageContaining("3.10.0")
+
+      // ...while an exact repeat is added once and the repeat reported as skipped
+      val adder = DependencyAdder.of(buildScript, listOf(okio, okio))
+      assertThat(adder.added()).containsExactly(okio)
+      assertThat(adder.skipped()).containsExactly(okio)
+    }
   }
 }
