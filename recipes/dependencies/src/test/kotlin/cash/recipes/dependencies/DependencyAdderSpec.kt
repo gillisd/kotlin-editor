@@ -238,6 +238,67 @@ internal class DependencyAdderSpec {
       )
     }
 
+    @Test fun `adds to a one-line dependencies block with content on that same line`() {
+      // Given a whole block on one line, and another with its last declaration on the closing brace's line
+      val buildScript =
+        """
+          dependencies { implementation("com.squareup.okio:okio:3.9.0") }
+
+          configure<Foo> {
+            bar = 1
+          }
+        """.trimIndent()
+
+      // When
+      val adder = DependencyAdder.of(
+        buildScript,
+        listOf(
+          Addition("implementation", StringLiteral("com.squareup.okhttp3:okhttp:5.5.1")),
+          Addition("api", Accessor("libs.picocli")),
+        ),
+      )
+
+      // Then the additions stay on that line, in the order given, and the brace stays put
+      assertThat(adder.rewritten()).isEqualTo(
+        """
+          dependencies { implementation("com.squareup.okio:okio:3.9.0"); implementation("com.squareup.okhttp3:okhttp:5.5.1"); api(libs.picocli) }
+
+          configure<Foo> {
+            bar = 1
+          }
+        """.trimIndent()
+      )
+    }
+
+    @Test fun `adds after a last declaration that shares its line with the closing brace`() {
+      // Given
+      val buildScript =
+        """
+          dependencies {
+            implementation("com.squareup.okio:okio:3.9.0")
+            testImplementation("org.junit.jupiter:junit-jupiter:5.11.0") }
+        """.trimIndent()
+
+      // When one goes after an ordinary line and one after the line with the brace
+      val adder = DependencyAdder.of(
+        buildScript,
+        listOf(
+          Addition("implementation", StringLiteral("com.squareup.okhttp3:okhttp:5.5.1")),
+          Addition("testImplementation", StringLiteral("org.assertj:assertj-core:3.27.7")),
+        ),
+      )
+
+      // Then
+      assertThat(adder.rewritten()).isEqualTo(
+        """
+          dependencies {
+            implementation("com.squareup.okio:okio:3.9.0")
+            implementation("com.squareup.okhttp3:okhttp:5.5.1")
+            testImplementation("org.junit.jupiter:junit-jupiter:5.11.0"); testImplementation("org.assertj:assertj-core:3.27.7") }
+        """.trimIndent()
+      )
+    }
+
     @Test fun `matches the indentation already used in the file`() {
       // Given a script indented with four spaces
       val buildScript =

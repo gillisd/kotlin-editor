@@ -116,20 +116,27 @@ public class DependencyAdder private constructor(
     // Lines are grouped by where they go and inserted once per spot: the rewriter would reverse several
     // separate inserts at the same token, and the order given must be kept.
     val linesAfter = LinkedHashMap<Token, MutableList<String>>()
+    val sameLineAfter = LinkedHashMap<Token, MutableList<String>>()
     val linesInEmptyBlock = mutableListOf<String>()
 
     for (addition in toAdd) {
       val anchor = existing.lastOrNull { it.declaration.configuration == addition.configuration }?.statement
         ?: lastStatement
-      if (anchor == null) {
-        linesInEmptyBlock += addition.render()
-      } else {
-        linesAfter.getOrPut(endOfLine(anchor.stop)) { mutableListOf() } += addition.render()
+      when {
+        anchor == null -> linesInEmptyBlock += addition.render()
+        // The block's closing brace is on the anchor's line, as in `dependencies { implementation(x) }`: stay on
+        // that line rather than land after the brace, keeping the existing text as it is.
+        endOfLine(anchor.stop).tokenIndex > block.stop.tokenIndex ->
+          sameLineAfter.getOrPut(anchor.stop) { mutableListOf() } += addition.render()
+        else -> linesAfter.getOrPut(endOfLine(anchor.stop)) { mutableListOf() } += addition.render()
       }
     }
 
     linesAfter.forEach { (newlineToken, lines) ->
       rewriter.insertBefore(newlineToken, lines.joinToString(separator = "") { "\n$indent$it" })
+    }
+    sameLineAfter.forEach { (statementEnd, lines) ->
+      rewriter.insertAfter(statementEnd, lines.joinToString(separator = "") { "; $it" })
     }
     if (linesInEmptyBlock.isNotEmpty()) {
       insertIntoEmptyBlock(block, linesInEmptyBlock)
