@@ -4,7 +4,6 @@ import cash.recipes.dependencies.transform.Transform
 import cash.recipes.dependencies.transform.Transform.Element.Accessor
 import cash.recipes.dependencies.transform.Transform.Element.StringLiteral
 import org.assertj.core.api.Assertions.assertThat
-import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
 
@@ -161,9 +160,6 @@ internal class DependenciesMutatorSpec {
       )
     }
 
-    // Known bug: the mutator replaces the whole argument, so platform("…:3.2.0") becomes "…:3.3.0" and the BOM turns
-    // into an ordinary dependency. This spec describes the correct behaviour; enable it when the bug is fixed.
-    @Disabled("bug: DependenciesMutator drops platform()/testFixtures() wrappers")
     @Test fun `keeps platform() around the dependency it changes`() {
       // Given
       val buildScript =
@@ -184,6 +180,32 @@ internal class DependenciesMutatorSpec {
         """
           dependencies {
             api(platform("tools.jackson:jackson-bom:3.3.0"))
+          }
+        """.trimIndent()
+      )
+    }
+
+    @Test fun `keeps testFixtures() and a trailing lambda when swapping in an accessor`() {
+      // Given
+      val buildScript =
+        """
+          dependencies {
+            testImplementation(testFixtures("com.example:core:1.0")) {
+              isTransitive = false
+            }
+          }
+        """.trimIndent()
+
+      // When
+      val mutator = mutate(buildScript, Transform(StringLiteral("com.example:core"), Accessor("libs.example.core")))
+
+      // Then
+      assertThat(mutator.rewritten()).isEqualTo(
+        """
+          dependencies {
+            testImplementation(testFixtures(libs.example.core)) {
+              isTransitive = false
+            }
           }
         """.trimIndent()
       )

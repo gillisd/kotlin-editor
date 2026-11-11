@@ -1,5 +1,6 @@
 package cash.recipes.dependencies
 
+import cash.grammar.kotlindsl.model.DependencyDeclaration.Capability
 import cash.grammar.kotlindsl.parse.Mutator
 import cash.grammar.kotlindsl.parse.Parser
 import cash.grammar.kotlindsl.utils.Blocks.isDependencies
@@ -7,6 +8,7 @@ import cash.grammar.kotlindsl.utils.CollectingErrorListener
 import cash.grammar.kotlindsl.utils.Context.leafRule
 import cash.grammar.kotlindsl.utils.DependencyExtractor
 import cash.recipes.dependencies.transform.Transform
+import com.squareup.cash.grammar.KotlinParser.ExpressionContext
 import com.squareup.cash.grammar.KotlinParser.NamedBlockContext
 import com.squareup.cash.grammar.KotlinParser.PostfixUnaryExpressionContext
 import com.squareup.cash.grammar.KotlinParser.ScriptContext
@@ -83,9 +85,30 @@ public class DependenciesMutator private constructor(
       }
       .forEach { (element, newText) ->
         changes = true
-        // postfix with parens because we took a shortcut with getStop() and cut it off
-        rewriter.replace(getStart(element.statement), getStop(element.statement), "${newText})")
+        val wrapped = wrappedArgument(element.statement)
+        if (element.declaration.capability != Capability.DEFAULT && wrapped != null) {
+          // platform(…), enforcedPlatform(…) or testFixtures(…): replace only what's inside, keeping the wrapper.
+          rewriter.replace(wrapped.start, wrapped.stop, newText)
+        } else {
+          // postfix with parens because we took a shortcut with getStop() and cut it off
+          rewriter.replace(getStart(element.statement), getStop(element.statement), "${newText})")
+        }
       }
+  }
+
+  /**
+   * For a declaration like `api(platform("com.foo:bom:1.0"))`, returns the expression inside the wrapper call
+   * (`"com.foo:bom:1.0"`), or null when the argument isn't a single-argument call.
+   */
+  private fun wrappedArgument(ctx: StatementContext): ExpressionContext? {
+    val outer = (ctx.leafRule() as? PostfixUnaryExpressionContext)
+      ?.postfixUnarySuffix()?.firstOrNull()
+      ?.callSuffix()?.valueArguments()?.valueArgument()?.singleOrNull()
+      ?.expression() ?: return null
+    val wrapper = outer.leafRule() as? PostfixUnaryExpressionContext ?: return null
+    return wrapper.postfixUnarySuffix().singleOrNull()
+      ?.callSuffix()?.valueArguments()?.valueArgument()?.singleOrNull()
+      ?.expression()
   }
 
   /** Returns the token marking the start of the identifier (after the opening parentheses). */
