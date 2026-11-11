@@ -169,15 +169,176 @@ internal class DependencyAdderSpec {
       )
     }
 
-    @Disabled("pending") @Test fun `adds to an empty multi-line dependencies block`() {}
+    @Test fun `adds to an empty multi-line dependencies block`() {
+      // Given an empty block whose only content is a comment
+      val buildScript =
+        """
+          plugins {
+            id("java-library")
+          }
 
-    @Disabled("pending") @Test fun `adds to an empty one-line dependencies block`() {}
+          dependencies {
+            // nothing yet
+          }
+        """.trimIndent()
 
-    @Disabled("pending") @Test fun `matches the indentation already used in the file`() {}
+      // When
+      val adder = DependencyAdder.of(
+        buildScript,
+        listOf(
+          Addition("implementation", StringLiteral("com.squareup.okio:okio:3.9.0")),
+          Addition("testImplementation", StringLiteral("org.junit.jupiter:junit-jupiter:5.11.0")),
+        ),
+      )
 
-    @Disabled("pending") @Test fun `keeps a comment just before the closing brace above the closing brace`() {}
+      // Then
+      assertThat(adder.rewritten()).isEqualTo(
+        """
+          plugins {
+            id("java-library")
+          }
 
-    @Disabled("pending") @Test fun `leaves existing declarations, their trailing lambdas and comments untouched`() {}
+          dependencies {
+            // nothing yet
+            implementation("com.squareup.okio:okio:3.9.0")
+            testImplementation("org.junit.jupiter:junit-jupiter:5.11.0")
+          }
+        """.trimIndent()
+      )
+    }
+
+    @Test fun `adds to an empty one-line dependencies block`() {
+      // Given
+      val buildScript =
+        """
+          plugins {
+            id("java-library")
+          }
+
+          dependencies {}
+        """.trimIndent()
+
+      // When
+      val adder = DependencyAdder.of(
+        buildScript,
+        listOf(Addition("implementation", StringLiteral("com.squareup.okio:okio:3.9.0"))),
+      )
+
+      // Then the block is opened up
+      assertThat(adder.rewritten()).isEqualTo(
+        """
+          plugins {
+            id("java-library")
+          }
+
+          dependencies {
+            implementation("com.squareup.okio:okio:3.9.0")
+          }
+        """.trimIndent()
+      )
+    }
+
+    @Test fun `matches the indentation already used in the file`() {
+      // Given a script indented with four spaces
+      val buildScript =
+        """
+          plugins {
+              id("java-library")
+          }
+
+          dependencies {
+              implementation("com.squareup.okio:okio:3.9.0")
+          }
+        """.trimIndent()
+
+      // When
+      val adder = DependencyAdder.of(
+        buildScript,
+        listOf(Addition("testImplementation", StringLiteral("org.junit.jupiter:junit-jupiter:5.11.0"))),
+      )
+
+      // Then
+      assertThat(adder.rewritten()).isEqualTo(
+        """
+          plugins {
+              id("java-library")
+          }
+
+          dependencies {
+              implementation("com.squareup.okio:okio:3.9.0")
+              testImplementation("org.junit.jupiter:junit-jupiter:5.11.0")
+          }
+        """.trimIndent()
+      )
+    }
+
+    @Test fun `keeps a comment just before the closing brace above the closing brace`() {
+      // Given a note at the end of the block
+      val buildScript =
+        """
+          dependencies {
+            implementation("com.squareup.okio:okio:3.9.0")
+            // keep this list sorted
+          }
+        """.trimIndent()
+
+      // When
+      val adder = DependencyAdder.of(
+        buildScript,
+        listOf(Addition("api", StringLiteral("com.squareup.okhttp3:okhttp:5.5.1"))),
+      )
+
+      // Then the new line goes above the note, which stays last
+      assertThat(adder.rewritten()).isEqualTo(
+        """
+          dependencies {
+            implementation("com.squareup.okio:okio:3.9.0")
+            api("com.squareup.okhttp3:okhttp:5.5.1")
+            // keep this list sorted
+          }
+        """.trimIndent()
+      )
+    }
+
+    @Test fun `leaves existing declarations, their trailing lambdas and comments untouched`() {
+      // Given declarations with an end-of-line comment, a trailing lambda and odd spacing
+      val buildScript =
+        """
+          dependencies {
+            implementation("com.squareup.okio:okio:3.9.0") // io
+            implementation("org.xerial:sqlite-jdbc:3.54.1.0") {
+              exclude(group = "org.slf4j")
+            }
+
+            testImplementation(  "org.junit.jupiter:junit-jupiter:5.11.0"  )
+          }
+        """.trimIndent()
+
+      // When one is added after the lambda and one after the end-of-line comment's neighbour
+      val adder = DependencyAdder.of(
+        buildScript,
+        listOf(
+          Addition("implementation", StringLiteral("com.squareup.okhttp3:okhttp:5.5.1")),
+          Addition("testImplementation", StringLiteral("org.assertj:assertj-core:3.27.7")),
+        ),
+      )
+
+      // Then every existing character stays as it was
+      assertThat(adder.rewritten()).isEqualTo(
+        """
+          dependencies {
+            implementation("com.squareup.okio:okio:3.9.0") // io
+            implementation("org.xerial:sqlite-jdbc:3.54.1.0") {
+              exclude(group = "org.slf4j")
+            }
+            implementation("com.squareup.okhttp3:okhttp:5.5.1")
+
+            testImplementation(  "org.junit.jupiter:junit-jupiter:5.11.0"  )
+            testImplementation("org.assertj:assertj-core:3.27.7")
+          }
+        """.trimIndent()
+      )
+    }
 
     @Test fun `ignores dependencies blocks that are not top-level, such as buildscript or a task`() {
       // Given a buildscript block with its own dependencies block, before the real one
