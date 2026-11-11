@@ -23,6 +23,7 @@ dependencyResolutionManagement {
   }
 }
 
+include(":build-script")
 include(":core")
 include(":grammar")
 include(":recipes:dependencies")
