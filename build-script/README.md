@@ -204,6 +204,30 @@ kotlin("jvm") version kotlinVersion
 
 Pinning a module also changes the version of its declarations with a classifier or an extension
 
+## Maven Central
+
+List the versions a module has published
+
+```kotlin
+val okio = Module("com.squareup.okio", "okio")
+val published = MavenCentral().listVersions(okio)
+// [
+//   com.squareup.okio:okio:0.5.0,
+//   ...
+//   com.squareup.okio:okio:3.18.2
+// ]
+```
+
+Pin to one of them
+
+```kotlin
+script.pin(published.last())
+```
+
+The list is in the repository's own order, which is not always oldest to newest, and includes pre-releases. Which version to use is your choice
+
+Searching by keyword is specified and not built yet
+
 ## Version Catalogs
 
 `libs.versions.toml` is not read or changed, so the library does not know which module `libs.okio` is

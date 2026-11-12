@@ -9,6 +9,7 @@
 * [feat]: `PluginVersionMutator` changes plugin versions in the top-level `plugins` block.
 * [feat]: `DependencyAdder` and `DependencyRemover` take a project path such as `:core`.
 * [fix]: `DependenciesMutator` keeps `platform()`, `enforcedPlatform()` and `testFixtures()` when it rewrites a dependency.
+* [feat]: `MavenCentral.listVersions` lists the versions a module has published.
 * [chore]: bump the foojay plugin in build-logic to 1.0.0 so the build configures on Gradle 9.
 * [feat]: the `build-script` module: a `BuildScript` lists a script's dependencies and plugins and offers `add`, `pin`, `remove` and `save`.
 
