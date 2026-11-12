@@ -19,9 +19,10 @@ Comments, spacing, and everything else stay exactly as written
 
 Works with dependencies and plugins in Kotlin DSL build scripts
 
-> **Status: design.** This README describes the planned API. It is specified by the pending specs in
-> [BuildScriptSpec](src/test/kotlin/cash/buildscript/BuildScriptSpec.kt) and is not implemented or published yet.
-> The name is provisional.
+> **Status: in progress.** Opening a script and listing its dependencies and plugins work today. `add`, `pin`,
+> `remove` and `save` are specified by pending specs in
+> [BuildScriptSpec](src/test/kotlin/cash/buildscript/BuildScriptSpec.kt) and are not implemented yet. Nothing is
+> published.
 
 ## Dependencies
 
@@ -159,7 +160,7 @@ val okio = Module("com.squareup.okio", "okio")
 script.add(ExternalModuleDependency(Configuration("implementation"), ModuleVersion(okio, RequiredVersion("3.18.2")), Unmodified))
 
 val kotlinJvm = PluginId("org.jetbrains.kotlin.jvm")
-script.add(PluginDependency(kotlinJvm, RequiredVersion("2.2.21")))
+script.add(Plugin(kotlinJvm, RequiredVersion("2.2.21")))
 ```
 
 ## When It Can't
@@ -181,6 +182,17 @@ Pinning or removing what is not declared fails
 
 ```kotlin
 script.remove("com.example:not-there")
+```
+
+## What Is Listed
+
+Only what the library models. These stay in the script as written and are left out of the lists
+
+```kotlin
+implementation(files("libs/local.jar"))
+implementation(projects.core)
+implementation("com.example:tool:1.0:all@zip")
+kotlin("jvm") version kotlinVersion
 ```
 
 ## Version Catalogs
