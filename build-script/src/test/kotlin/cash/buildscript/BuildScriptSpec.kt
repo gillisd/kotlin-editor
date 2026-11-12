@@ -549,23 +549,161 @@ internal class BuildScriptSpec {
 
   @Nested inner class `pinning a ModuleVersion` {
 
-    @Disabled("pending") @Test fun `sets the Version of that Module on every Configuration it is declared on`() {}
+    @Test fun `sets the Version of that Module on every Configuration it is declared on`() {
+      val script = open(
+        """
+          dependencies {
+            implementation("com.squareup.okio:okio:3.9.0")
+            implementation("com.squareup.okhttp3:okhttp:5.5.1")
+            testImplementation("com.squareup.okio:okio:3.8.0")
+          }
+        """.trimIndent()
+      )
 
-    @Disabled("pending") @Test fun `accepts a ModuleVersion or its string form`() {}
+      script.pin(ModuleVersion(okio, RequiredVersion("3.18.2")))
 
-    @Disabled("pending") @Test fun `takes the Version as a named argument instead of a third segment`() {}
+      assertThat(script.source).isEqualTo(
+        """
+          dependencies {
+            implementation("com.squareup.okio:okio:3.18.2")
+            implementation("com.squareup.okhttp3:okhttp:5.5.1")
+            testImplementation("com.squareup.okio:okio:3.18.2")
+          }
+        """.trimIndent()
+      )
+      assertThat(script.dependencies.filterIsInstance<ExternalModuleDependency>().filter { it.moduleVersion.module == okio }.map { it.moduleVersion.version })
+        .containsExactly(RequiredVersion("3.18.2"), RequiredVersion("3.18.2"))
+    }
 
-    @Disabled("pending") @Test fun `keeps the DependencyModifier, a trailing block and comments`() {}
+    @Test fun `accepts a ModuleVersion or its string form`() {
+      val fromParts = open(twoDependencies)
+      val fromString = open(twoDependencies)
 
-    @Disabled("pending") @Test fun `changes nothing when the Module is already at that Version`() {}
+      fromParts.pin(ModuleVersion(okio, RequiredVersion("3.19.0")))
+      fromString.pin("com.squareup.okio:okio:3.19.0")
 
-    @Disabled("pending") @Test fun `fails with UndeclaredDependency when the Module is not declared`() {}
+      assertThat(fromString.source).isEqualTo(fromParts.source)
+      assertThat(fromString.source).contains("""implementation("com.squareup.okio:okio:3.19.0")""")
+    }
 
-    @Disabled("pending") @Test fun `fails with VersionInCatalog when the Module is declared only as a CatalogDependency`() {}
+    @Test fun `takes the Version as a named argument instead of a third segment`() {
+      val script = open(twoDependencies)
 
-    @Disabled("pending") @Test fun `fails with MissingVersion when no Version is given, in the string or by name`() {}
+      script.pin("com.squareup.okio:okio", version = "3.19.0")
 
-    @Disabled("pending") @Test fun `fails with UnreadableDependency when the Version is given both in the string and as a named argument`() {}
+      assertThat(script.source).contains("""implementation("com.squareup.okio:okio:3.19.0")""")
+    }
+
+    @Test fun `keeps the DependencyModifier, a trailing block and comments`() {
+      val script = open(
+        """
+          dependencies {
+            // the bill of materials
+            api(platform("tools.jackson:jackson-bom:3.2.0")) // pinned by hand
+            implementation("com.squareup.okio:okio:3.9.0") {
+              exclude(group = "org.jetbrains.kotlin")
+            }
+          }
+        """.trimIndent()
+      )
+
+      script.pin("tools.jackson:jackson-bom:3.3.0")
+      script.pin("com.squareup.okio:okio:3.18.2")
+
+      assertThat(script.source).isEqualTo(
+        """
+          dependencies {
+            // the bill of materials
+            api(platform("tools.jackson:jackson-bom:3.3.0")) // pinned by hand
+            implementation("com.squareup.okio:okio:3.18.2") {
+              exclude(group = "org.jetbrains.kotlin")
+            }
+          }
+        """.trimIndent()
+      )
+      assertThat(script.dependencies.first().modifier).isEqualTo(Platform)
+    }
+
+    @Test fun `changes nothing when the Module is already at that Version`() {
+      val script = open(twoDependencies)
+
+      script.pin("com.squareup.okio:okio:3.18.2")
+
+      assertThat(script.source).isEqualTo(twoDependencies)
+    }
+
+    @Test fun `writes the Version when the Module is declared without one`() {
+      val script = open(
+        """
+          dependencies {
+            testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+          }
+        """.trimIndent()
+      )
+
+      script.pin("org.junit.platform:junit-platform-launcher", version = "6.1.3")
+
+      assertThat(script.source).contains("""testRuntimeOnly("org.junit.platform:junit-platform-launcher:6.1.3")""")
+    }
+
+    @Test fun `fails with UndeclaredDependency when the Module is not declared`() {
+      val script = open(twoDependencies)
+
+      assertThatThrownBy { script.pin("com.squareup.okhttp3:okhttp:5.5.1") }
+        .isInstanceOf(UndeclaredDependency::class.java)
+        .hasMessageContaining("com.squareup.okhttp3:okhttp")
+      assertThat(script.source).isEqualTo(twoDependencies)
+    }
+
+    @Test fun `points to the Version Catalog when the Module is not declared and the script has a CatalogDependency`() {
+      // The layer does not read the catalog, so it cannot tell which Module libs.okhttp is.
+      val script = open(
+        """
+          dependencies {
+            implementation(libs.okhttp)
+          }
+        """.trimIndent()
+      )
+
+      assertThatThrownBy { script.pin("com.squareup.okhttp3:okhttp:5.5.1") }
+        .isInstanceOf(UndeclaredDependency::class.java)
+        .hasMessageContaining("Version Catalog")
+    }
+
+    @Test fun `fails with VersionInCatalog when given a TypeSafeAccessor`() {
+      val script = open(
+        """
+          dependencies {
+            implementation(libs.okhttp)
+          }
+        """.trimIndent()
+      )
+
+      assertThatThrownBy { script.pin("libs.okhttp", version = "5.5.1") }
+        .isInstanceOf(VersionInCatalog::class.java)
+        .hasMessageContaining("libs.okhttp")
+      // Whether or not the script declares it.
+      assertThatThrownBy { script.pin("libs.okio", version = "3.18.2") }.isInstanceOf(VersionInCatalog::class.java)
+    }
+
+    @Test fun `fails with MissingVersion when no Version is given, in the string or by name`() {
+      val script = open(twoDependencies)
+
+      assertThatThrownBy { script.pin("com.squareup.okio:okio") }.isInstanceOf(MissingVersion::class.java)
+      assertThatThrownBy { script.pin(ModuleVersion(okio, UnspecifiedVersion)) }.isInstanceOf(MissingVersion::class.java)
+      assertThat(script.source).isEqualTo(twoDependencies)
+    }
+
+    @Test fun `fails with UnreadableDependency when the Version is given twice or the string is not a ModuleVersion`() {
+      val script = open(twoDependencies)
+
+      assertThatThrownBy { script.pin("com.squareup.okio:okio:3.19.0", version = "3.19.0") }
+        .isInstanceOf(UnreadableDependency::class.java)
+        .hasMessageContaining("twice")
+      assertThatThrownBy { script.pin(":core") }.isInstanceOf(UnreadableDependency::class.java)
+      assertThatThrownBy { script.pin("okio", version = "3.19.0") }.isInstanceOf(UnreadableDependency::class.java)
+      assertThat(script.source).isEqualTo(twoDependencies)
+    }
   }
 
   @Nested inner class `removing a Dependency` {
@@ -665,17 +803,90 @@ internal class BuildScriptSpec {
 
   @Nested inner class `pinning a Plugin` {
 
-    @Disabled("pending") @Test fun `sets the Version of that PluginId`() {}
+    @Test fun `sets the Version of that PluginId`() {
+      val script = open(twoPlugins)
 
-    @Disabled("pending") @Test fun `keeps apply false and everything else on the line`() {}
+      script.pin(Plugin(PluginId("org.jetbrains.kotlin.jvm"), RequiredVersion("2.2.21")))
 
-    @Disabled("pending") @Test fun `changes nothing when the Plugin is already at that Version`() {}
+      assertThat(script.source).isEqualTo(
+        """
+          plugins {
+            application
+            kotlin("jvm") version "2.2.21"
+          }
+        """.trimIndent()
+      )
+      assertThat(script.pluginDependencies.last())
+        .isEqualTo(Plugin(PluginId("org.jetbrains.kotlin.jvm"), RequiredVersion("2.2.21")))
+    }
 
-    @Disabled("pending") @Test fun `fails with UndeclaredPlugin when that PluginId is not declared`() {}
+    @Test fun `keeps apply false and everything else on the line`() {
+      val script = open(
+        """
+          plugins {
+            id("com.example.plugin") version "1.0" apply false // for the subprojects
+          }
+        """.trimIndent()
+      )
 
-    @Disabled("pending") @Test fun `fails with MissingVersion when the Plugin is declared without a Version`() {}
+      script.pin(PluginId("com.example.plugin"), version = "2.0")
 
-    @Disabled("pending") @Test fun `fails with VersionInCatalog when the plugin is declared as a CatalogPlugin`() {}
+      assertThat(script.source).isEqualTo(
+        """
+          plugins {
+            id("com.example.plugin") version "2.0" apply false // for the subprojects
+          }
+        """.trimIndent()
+      )
+    }
+
+    @Test fun `changes nothing when the Plugin is already at that Version`() {
+      val script = open(twoPlugins)
+
+      script.pin(PluginId("org.jetbrains.kotlin.jvm"), version = "2.2.0")
+
+      assertThat(script.source).isEqualTo(twoPlugins)
+    }
+
+    @Test fun `fails with UndeclaredPlugin when that PluginId is not declared`() {
+      val script = open(twoPlugins)
+
+      assertThatThrownBy { script.pin(PluginId("com.example.plugin"), version = "2.0") }
+        .isInstanceOf(UndeclaredPlugin::class.java)
+        .hasMessageContaining("com.example.plugin")
+      assertThat(script.source).isEqualTo(twoPlugins)
+    }
+
+    @Test fun `fails with MissingVersion when the Plugin is declared without a Version`() {
+      val script = open(twoPlugins)
+
+      assertThatThrownBy { script.pin(PluginId("application"), version = "1.0") }
+        .isInstanceOf(MissingVersion::class.java)
+        .hasMessageContaining("declared without a Version")
+      assertThat(script.source).isEqualTo(twoPlugins)
+    }
+
+    @Test fun `fails with MissingVersion when the Plugin given has UnspecifiedVersion`() {
+      val script = open(twoPlugins)
+
+      assertThatThrownBy { script.pin(Plugin(PluginId("org.jetbrains.kotlin.jvm"))) }
+        .isInstanceOf(MissingVersion::class.java)
+    }
+
+    @Test fun `points to the Version Catalog when that PluginId is not declared and the script has a CatalogPlugin`() {
+      // The layer does not read the catalog, so it cannot tell which PluginId libs.plugins.shadow is.
+      val script = open(
+        """
+          plugins {
+            alias(libs.plugins.shadow)
+          }
+        """.trimIndent()
+      )
+
+      assertThatThrownBy { script.pin(PluginId("com.gradleup.shadow"), version = "9.4.1") }
+        .isInstanceOf(UndeclaredPlugin::class.java)
+        .hasMessageContaining("Version Catalog")
+    }
   }
 
   @Nested inner class `removing a PluginDependency` {
@@ -705,9 +916,13 @@ internal class BuildScriptSpec {
       assertThat(script.pluginDependencies).contains(Plugin(PluginId("com.example.convention"), UnspecifiedVersion))
     }
 
-    @Disabled("pending") @Test fun `pins a Plugin from a PluginId and a named Version`() {}
+    @Test fun `pins a Plugin from a PluginId and a named Version`() {
+      val script = open(twoPlugins)
 
-    @Disabled("pending") @Test fun `fails with MissingVersion to pin a Plugin when no Version is named`() {}
+      script.pin(PluginId("org.jetbrains.kotlin.jvm"), version = "2.2.21")
+
+      assertThat(script.source).contains("""kotlin("jvm") version "2.2.21"""")
+    }
 
     @Disabled("pending") @Test fun `removes a Plugin from a PluginId alone, whatever its Version`() {}
   }

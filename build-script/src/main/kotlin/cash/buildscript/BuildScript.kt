@@ -12,8 +12,10 @@ import cash.grammar.kotlindsl.utils.DependencyExtractor
 import cash.grammar.kotlindsl.utils.PluginExtractor
 import cash.grammar.kotlindsl.utils.Whitespace
 import cash.recipes.dependencies.DependencyAdder
+import cash.recipes.dependencies.DependencyVersionMutator
 import cash.recipes.dependencies.transform.Transform
 import cash.recipes.plugins.PluginAdder
+import cash.recipes.plugins.PluginVersionMutator
 import com.squareup.cash.grammar.KotlinParser.NamedBlockContext
 import com.squareup.cash.grammar.KotlinParser.ScriptContext
 import com.squareup.cash.grammar.KotlinParserBaseListener
@@ -144,6 +146,78 @@ public class BuildScript private constructor(private val file: Path, source: Str
   @JvmOverloads
   public fun add(pluginId: PluginId, version: String? = null) {
     add(Plugin(pluginId, version?.let(::RequiredVersion) ?: UnspecifiedVersion))
+  }
+
+  /**
+   * Sets the [Version] of [moduleVersion]'s [Module] on every [Configuration] it is declared on. A declaration with
+   * no version gets one. Changes nothing when it is already at that version.
+   *
+   * @throws MissingVersion if [moduleVersion] has no [RequiredVersion].
+   * @throws UndeclaredDependency if the script does not declare that [Module] as an [ExternalModuleDependency].
+   */
+  public fun pin(moduleVersion: ModuleVersion) {
+    val module = moduleVersion.module
+    val wanted = moduleVersion.version as? RequiredVersion
+      ?: throw MissingVersion("pin needs a Version for ${module.written()}.")
+    if (dependencies.none { it is ExternalModuleDependency && it.moduleVersion.module == module }) {
+      val hint = if (dependencies.any { it is CatalogDependency }) {
+        " If it is declared through a type-safe accessor, its Version is in the Version Catalog."
+      } else {
+        ""
+      }
+      throw UndeclaredDependency("${module.written()} is not declared.$hint")
+    }
+    rewrite { DependencyVersionMutator.of(source, mapOf(module.written() to wanted.text)).rewritten() }
+  }
+
+  /**
+   * Pins the [ModuleVersion] that [moduleVersion] describes: `group:name:version`, or `group:name` with the
+   * [version] named.
+   *
+   * @throws VersionInCatalog if the string is a type-safe accessor: its version is in the Version Catalog.
+   * @throws MissingVersion if no version is given, in the string or by name.
+   * @throws UnreadableDependency if the string is neither shape, or if the version is given twice.
+   * @throws UndeclaredDependency if the script does not declare that [Module].
+   */
+  @JvmOverloads
+  public fun pin(moduleVersion: String, version: String? = null) {
+    if (accessorPattern.matches(moduleVersion)) {
+      throw VersionInCatalog("The Version of $moduleVersion is in the Version Catalog; change it there.")
+    }
+    when (val shape = shapeOf(moduleVersion, version)) {
+      is ModuleVersion -> pin(shape)
+      else -> throw UnreadableDependency("Cannot pin '$moduleVersion': a project path has no Version.")
+    }
+  }
+
+  /**
+   * Sets the [Version] of the declared [Plugin] with [plugin]'s [PluginId]. Changes nothing when it is already at
+   * that version.
+   *
+   * @throws MissingVersion if [plugin] has no [RequiredVersion], or if the script declares it without one.
+   * @throws UndeclaredPlugin if the script does not declare that [PluginId].
+   */
+  public fun pin(plugin: Plugin) {
+    val id = plugin.pluginId.id
+    val wanted = plugin.version as? RequiredVersion ?: throw MissingVersion("pin needs a Version for $id.")
+    val declared = pluginDependencies.filterIsInstance<Plugin>().firstOrNull { it.pluginId == plugin.pluginId }
+    if (declared == null) {
+      val hint = if (pluginDependencies.any { it is CatalogPlugin }) {
+        " If it is declared through alias(…), its Version is in the Version Catalog."
+      } else {
+        ""
+      }
+      throw UndeclaredPlugin("$id is not declared.$hint")
+    }
+    if (declared.version !is RequiredVersion) {
+      throw MissingVersion("$id is declared without a Version, so there is none to pin.")
+    }
+    rewrite { PluginVersionMutator.of(source, mapOf(id to wanted.text)).rewritten() }
+  }
+
+  /** Pins the [Plugin] with this [pluginId] at [version]. */
+  public fun pin(pluginId: PluginId, version: String) {
+    pin(Plugin(pluginId, RequiredVersion(version)))
   }
 
   /** Runs a recipe on the current source and reads the result back into parts. */
