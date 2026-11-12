@@ -43,6 +43,12 @@ Add one
 script.add("com.squareup.okio:okio:3.18.2")
 ```
 
+Or name the version
+
+```kotlin
+script.add("com.squareup.okio:okio", version = "3.18.2")
+```
+
 To another configuration
 
 ```kotlin
@@ -70,7 +76,7 @@ script.add(":core")
 Pin a version
 
 ```kotlin
-script.pin("com.squareup.okio:okio:3.18.2")
+script.pin("com.squareup.okio:okio", version = "3.19.0")
 ```
 
 Remove one
@@ -101,20 +107,19 @@ script.pluginDependencies
 Add one
 
 ```kotlin
-val kotlinJvm = PluginId("org.jetbrains.kotlin.jvm")
-script.add(PluginDependency(kotlinJvm, RequiredVersion("2.2.21")))
+script.add(PluginId("org.jetbrains.kotlin.jvm"), version = "2.2.21")
 ```
 
 Pin a version
 
 ```kotlin
-script.pin(PluginDependency(kotlinJvm, RequiredVersion("2.2.21")))
+script.pin(PluginId("org.jetbrains.kotlin.jvm"), version = "2.3.0")
 ```
 
 Remove one
 
 ```kotlin
-script.remove(PluginDependency(kotlinJvm, RequiredVersion("2.2.21")))
+script.remove(PluginId("org.jetbrains.kotlin.jvm"))
 ```
 
 ## Saving
@@ -138,19 +143,23 @@ A string is read by its shape
 ```kotlin
 script.add("com.squareup.okio:okio:3.18.2")   // Group, Name and Version
 script.add("com.squareup.okio:okio")          // Group and Name, no Version
+script.add("com.squareup.okio:okio", version = "3.18.2")
 script.add("libs.okio")                       // version catalog
 script.add(":core")                           // another project
 ```
 
-The configuration is `implementation` unless you name one. Strings are written as given: a typo is reported by Gradle the next time the build runs.
+The configuration is `implementation` unless you name one. Give the version in the string or by name, not both. Strings are written as given: a typo is reported by Gradle the next time the build runs.
 
 ## Being Explicit
 
-Every string has a full form
+Every short form has a full form
 
 ```kotlin
 val okio = Module("com.squareup.okio", "okio")
 script.add(ExternalModuleDependency(Configuration("implementation"), ModuleVersion(okio, RequiredVersion("3.18.2")), Unmodified))
+
+val kotlinJvm = PluginId("org.jetbrains.kotlin.jvm")
+script.add(PluginDependency(kotlinJvm, RequiredVersion("2.2.21")))
 ```
 
 ## When It Can't
@@ -165,7 +174,7 @@ script.add("com.squareup.okio:okio:3.18.2")
 Adding it at a different version fails. Use `pin`
 
 ```kotlin
-script.pin("com.squareup.okio:okio:3.19.0")
+script.pin("com.squareup.okio:okio", version = "3.19.0")
 ```
 
 Pinning or removing what is not declared fails

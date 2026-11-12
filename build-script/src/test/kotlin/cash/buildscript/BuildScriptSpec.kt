@@ -10,7 +10,8 @@ import org.junit.jupiter.api.Test
 // word that is not a type (Group, Name) is a domain term. Kotlin does not allow a period or a colon in a test
 // name, so "the version catalog" stands for libs.versions.toml and strings are described, not quoted.
 //
-// Not covered yet: a string form for plugin dependencies, which is still an open question in the plan.
+// A plugin has no plain string form: Kotlin would resolve a bare string to the wrong overload, so the short form for
+// plugins takes a PluginId.
 internal class BuildScriptSpec {
 
   @Nested inner class `opening a build script` {
@@ -77,6 +78,12 @@ internal class BuildScriptSpec {
 
     @Disabled("pending") @Test fun `reads a string that starts with a colon as a ProjectPath`() {}
 
+    @Disabled("pending") @Test fun `takes the Version as a named argument instead of a third segment`() {}
+
+    @Disabled("pending") @Test fun `fails when the Version is given both in the string and as a named argument`() {}
+
+    @Disabled("pending") @Test fun `fails when a Version is named for a TypeSafeAccessor or a ProjectPath`() {}
+
     @Disabled("pending") @Test fun `uses the implementation Configuration when none is named`() {}
 
     @Disabled("pending") @Test fun `uses the Configuration that is named`() {}
@@ -96,6 +103,8 @@ internal class BuildScriptSpec {
 
     @Disabled("pending") @Test fun `accepts a ModuleVersion or its string form`() {}
 
+    @Disabled("pending") @Test fun `takes the Version as a named argument instead of a third segment`() {}
+
     @Disabled("pending") @Test fun `keeps the DependencyModifier, a trailing block and comments`() {}
 
     @Disabled("pending") @Test fun `succeeds and reports unchanged when the Module is already at that Version`() {}
@@ -104,7 +113,9 @@ internal class BuildScriptSpec {
 
     @Disabled("pending") @Test fun `fails, saying the Version is in the version catalog, when the Module is declared through a TypeSafeAccessor`() {}
 
-    @Disabled("pending") @Test fun `fails when the string form has no Version`() {}
+    @Disabled("pending") @Test fun `fails when no Version is given, in the string or by name`() {}
+
+    @Disabled("pending") @Test fun `fails when the Version is given both in the string and as a named argument`() {}
 
     @Disabled("pending") @Test fun `returns what was pinned`() {}
   }
@@ -165,6 +176,19 @@ internal class BuildScriptSpec {
     @Disabled("pending") @Test fun `fails, naming the PluginId, when it is not declared`() {}
 
     @Disabled("pending") @Test fun `returns what was removed`() {}
+  }
+
+  @Nested inner class `naming a plugin by its PluginId` {
+
+    @Disabled("pending") @Test fun `adds a plugin from a PluginId and a named Version`() {}
+
+    @Disabled("pending") @Test fun `adds a plugin from a PluginId alone, with UnspecifiedVersion`() {}
+
+    @Disabled("pending") @Test fun `pins a plugin from a PluginId and a named Version`() {}
+
+    @Disabled("pending") @Test fun `fails to pin a plugin when no Version is named`() {}
+
+    @Disabled("pending") @Test fun `removes a plugin from a PluginId alone, whatever its Version`() {}
   }
 
   @Nested inner class `keeping the rest of the script as written` {
