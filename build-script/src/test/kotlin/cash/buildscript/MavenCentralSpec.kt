@@ -13,9 +13,11 @@ internal class MavenCentralSpec {
   @Nested inner class `listing the versions of a Module` {
     @Disabled("pending") @Test fun `returns a ModuleVersion for every version the repository lists`() {}
 
-    @Disabled("pending") @Test fun `keeps the order the repository lists them in, oldest first`() {}
+    @Disabled("pending") @Test fun `keeps the order the repository lists them in, without sorting`() {}
 
     @Disabled("pending") @Test fun `includes pre-release versions as listed`() {}
+
+    @Disabled("pending") @Test fun `leaves a pre-release that the repository lists after its release where it is`() {}
 
     @Disabled("pending") @Test fun `asks the repository at the path made from the Group and the Name`() {}
 

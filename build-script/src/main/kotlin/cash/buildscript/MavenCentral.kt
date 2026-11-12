@@ -13,8 +13,9 @@ public class MavenCentral @JvmOverloads constructor(
 ) {
 
   /**
-   * Every version of [module] the repository lists, in the order it lists them, oldest first. Pre-release versions
-   * are included as listed: which one to use is the caller's choice.
+   * Every version of [module] the repository lists, in the order it lists them, unsorted. That order follows version
+   * numbers only roughly: a pre-release can come after its release (`2.10.0`, then `2.10.0.pr1`), so the last entry
+   * is not always the newest. Pre-release versions are included as listed. Which one to use is the caller's choice.
    *
    * @throws UnpublishedModule if the repository has no such module.
    * @throws UnreachableRepository if Maven Central does not answer.
@@ -25,7 +26,8 @@ public class MavenCentral @JvmOverloads constructor(
 
   /**
    * The modules whose Group or Name matches [keyword], in the order Maven Central ranks them. No more than [limit]
-   * are returned; none when nothing matches. A match carries no version: [listVersions] supplies those.
+   * are returned, 20 unless another is named, as `npm search` does; none when nothing matches. A match carries no
+   * version: [listVersions] supplies those.
    *
    * @throws UnreachableRepository if Maven Central does not answer.
    * @throws RejectedRequest if it answers with an error status.
