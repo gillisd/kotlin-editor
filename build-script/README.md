@@ -226,7 +226,29 @@ script.pin(published.last())
 
 The list is in the repository's own order, which is not always oldest to newest, and includes pre-releases. Which version to use is your choice
 
-Searching by keyword is specified and not built yet
+Search by keyword
+
+```kotlin
+MavenCentral().search("okio", limit = 5)
+// [
+//   com.squareup.okio:benchmarks,
+//   com.squareup.okio:okio,
+//   org.wso2.orbit.com.squareup.okio:okio,
+//   io.github.wangbax:okio,
+//   com.fleeksoft.io:okio
+// ]
+```
+
+A match is a `Module` with no version. The order is Maven Central's, and the library you want is often not first: check the Group. A keyword is one word; Maven Central rejects one with a space
+
+When it can't answer
+
+| Failure | When |
+| --- | --- |
+| `UnpublishedModule` | the repository has no such module |
+| `UnreachableRepository` | Maven Central does not answer |
+| `RejectedRequest` | it answers with an error status, which the failure carries |
+| `UnreadableReply` | its answer is not what was asked for |
 
 ## Version Catalogs
 

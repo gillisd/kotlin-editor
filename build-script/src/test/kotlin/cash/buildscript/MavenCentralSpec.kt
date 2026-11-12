@@ -5,7 +5,6 @@ import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
-import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -14,18 +13,20 @@ import java.net.URI
 import java.nio.file.Files
 import java.nio.file.Path
 
-// Specs for Maven Central. A spec stays @Disabled("pending") until it is written.
+// Specs for Maven Central.
 //
 // Wording follows BuildScriptSpec: a name in CamelCase is a type in the layer; a capitalized word that is not a type
 // (Group, Name) is a domain term. Every spec runs against a recorded reply, never the live service: the replies in
-// src/test/resources/maven-central were recorded from repo1.maven.org on 12 November 2026 and are served from a local
-// address that stands in for the repository.
+// src/test/resources/maven-central were recorded from repo1.maven.org and central.sonatype.com on 12 November 2026 and
+// are served from a local address that stands in for both.
 internal class MavenCentralSpec {
 
   @TempDir lateinit var directory: Path
 
   private val okio = Module("com.squareup.okio", "okio")
   private val jacksonDatabind = Module("com.fasterxml.jackson.core", "jackson-databind")
+
+  private val index = "/solrsearch/select"
 
   private lateinit var stand: HttpServer
   private lateinit var central: MavenCentral
@@ -37,7 +38,7 @@ internal class MavenCentralSpec {
   @BeforeEach fun startStand() {
     stand = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
     stand.createContext("/") { exchange ->
-      asked += exchange.requestURI.path
+      asked += exchange.requestURI.toString()
       val (status, body) = answers[exchange.requestURI.path] ?: (404 to "")
       val bytes = body.toByteArray()
       exchange.sendResponseHeaders(status, if (bytes.isEmpty()) -1 else bytes.size.toLong())
@@ -45,7 +46,11 @@ internal class MavenCentralSpec {
       exchange.close()
     }
     stand.start()
-    central = MavenCentral(repository = URI("http://127.0.0.1:${stand.address.port}/maven2/"))
+    central = MavenCentral(
+      repository = URI("http://127.0.0.1:${stand.address.port}/maven2/"),
+      searchIndex = URI("http://127.0.0.1:${stand.address.port}/solrsearch/select"),
+    )
+    answers[index] = 200 to recorded("search-okhttp.xml")
     answers["/maven2/com/squareup/okio/okio/maven-metadata.xml"] = 200 to recorded("okio.xml")
     answers["/maven2/com/fasterxml/jackson/core/jackson-databind/maven-metadata.xml"] =
       200 to recorded("jackson-databind.xml")
@@ -135,19 +140,56 @@ internal class MavenCentralSpec {
   }
 
   @Nested inner class `searching by keyword` {
-    @Disabled("pending") @Test fun `returns a Module for each match, with no Version`() {}
+    @Test fun `returns a Module for each match, with no Version`() {
+      val found: List<Module> = central.search("okhttp")
 
-    @Disabled("pending") @Test fun `returns each Module once`() {}
+      assertThat(found).hasSize(20).contains(Module("com.squareup.okhttp3", "okhttp"))
+    }
 
-    @Disabled("pending") @Test fun `keeps the order Maven Central ranks them in`() {}
+    @Test fun `returns each Module once`() {
+      val twice = "<docs><g>com.foo</g><a>bar</a></docs>"
+      answers[index] = 200 to "<SolrWrappedResponse><response><docs>$twice$twice</docs></response></SolrWrappedResponse>"
 
-    @Disabled("pending") @Test fun `returns an empty list when nothing matches`() {}
+      assertThat(central.search("bar")).containsExactly(Module("com.foo", "bar"))
+    }
 
-    @Disabled("pending") @Test fun `sends the keyword as typed, encoding spaces and symbols`() {}
+    @Test fun `keeps the order Maven Central gives them in`() {
+      val found = central.search("okhttp")
 
-    @Disabled("pending") @Test fun `asks for 20 when no limit is named`() {}
+      assertThat(found.take(3)).containsExactly(
+        Module("com.squareup.okhttp", "benchmarks"),
+        Module("com.commsen.wedeploy", "com.commsen.wedeploy.transport.rest.okhttp"),
+        Module("eu.the4thfloor.mockwebserver", "com.squareup.okhttp.mockwebserver"),
+      )
+      // Square's own library is the eighteenth of the twenty recorded: the order is Maven Central's, not ours.
+      assertThat(found.indexOf(Module("com.squareup.okhttp3", "okhttp"))).isEqualTo(17)
+    }
 
-    @Disabled("pending") @Test fun `asks for the limit that is named`() {}
+    @Test fun `returns an empty list when nothing matches`() {
+      answers[index] = 200 to recorded("search-no-match.xml")
+
+      assertThat(central.search("zzzqqqxxnomatch")).isEmpty()
+    }
+
+    @Test fun `sends the keyword as typed, encoding symbols`() {
+      central.search("a&b=c")
+
+      assertThat(asked.single()).startsWith("$index?q=a%26b%3Dc&")
+    }
+
+    @Test fun `asks for 20 when no limit is named`() {
+      central.search("okhttp")
+
+      assertThat(asked.single()).isEqualTo("$index?q=okhttp&rows=20&wt=xml")
+    }
+
+    @Test fun `asks for the limit that is named`() {
+      val found = central.search("okhttp", limit = 5)
+
+      assertThat(asked.single()).contains("rows=5")
+      // No more than the limit comes back, whatever Maven Central sends.
+      assertThat(found).hasSize(5)
+    }
   }
 
   @Nested inner class `when Maven Central cannot answer` {
@@ -157,6 +199,7 @@ internal class MavenCentralSpec {
       assertThatThrownBy { central.listVersions(okio) }
         .isInstanceOf(UnreachableRepository::class.java)
         .hasMessageContaining("maven-metadata.xml")
+      assertThatThrownBy { central.search("okhttp") }.isInstanceOf(UnreachableRepository::class.java)
     }
 
     @Test fun `fails with RejectedRequest, carrying the status, when it answers with an error status`() {
@@ -166,7 +209,19 @@ internal class MavenCentralSpec {
         answers[path] = status to "slow down"
         assertThatThrownBy { central.listVersions(okio) }
           .isInstanceOfSatisfying(RejectedRequest::class.java) { assertThat(it.status).isEqualTo(status) }
+        answers[index] = status to "slow down"
+        assertThatThrownBy { central.search("okhttp") }
+          .isInstanceOfSatisfying(RejectedRequest::class.java) { assertThat(it.status).isEqualTo(status) }
       }
+    }
+
+    @Test fun `fails with RejectedRequest when Maven Central rejects the keyword, as it does one with a space`() {
+      // Recorded behaviour: central.sonatype.com answers 400 to q=json+parser.
+      answers[index] = 400 to ""
+
+      assertThatThrownBy { central.search("json parser") }
+        .isInstanceOfSatisfying(RejectedRequest::class.java) { assertThat(it.status).isEqualTo(400) }
+      assertThat(asked.single()).startsWith("$index?q=json+parser&")
     }
 
     @Test fun `fails with UnreadableReply when the answer is not a list of versions`() {
@@ -191,8 +246,29 @@ internal class MavenCentralSpec {
       assertThat(central.listVersions(okio)).isEmpty()
     }
 
-    @Disabled("pending") @Test fun `fails with UnreadableReply when the answer is not a search reply`() {}
+    @Test fun `fails with UnreadableReply when the answer is not a search reply`() {
+      listOf(
+        "<html><body>Be right back</body></html>",
+        "{\"response\":{\"docs\":[]}}",
+        "<response><docs/></response>",
+        "<html><response><docs/></response></html>",
+        "<SolrWrappedResponse><response/></SolrWrappedResponse>",
+        "<SolrWrappedResponse><response><docs><docs><g>com.foo</g></docs></docs></response></SolrWrappedResponse>",
+        "<SolrWrappedResponse><response><docs><docs><a>bar</a></docs></docs></response></SolrWrappedResponse>",
+      ).forEach { unreadable ->
+        answers[index] = 200 to unreadable
+        assertThatThrownBy { central.search("okhttp") }
+          .describedAs(unreadable)
+          .isInstanceOf(UnreadableReply::class.java)
+      }
+    }
 
-    @Disabled("pending") @Test fun `refuses a blank keyword and a limit below one without asking`() {}
+    @Test fun `refuses a blank keyword and a limit below one without asking`() {
+      assertThatThrownBy { central.search("") }.isInstanceOf(IllegalArgumentException::class.java)
+      assertThatThrownBy { central.search("   ") }.isInstanceOf(IllegalArgumentException::class.java)
+      assertThatThrownBy { central.search("okhttp", limit = 0) }.isInstanceOf(IllegalArgumentException::class.java)
+
+      assertThat(asked).isEmpty()
+    }
   }
 }
