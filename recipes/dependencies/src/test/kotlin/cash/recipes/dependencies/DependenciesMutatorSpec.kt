@@ -40,7 +40,7 @@ internal class DependenciesMutatorSpec {
       )
     }
 
-    @Test fun `changes a version when matched by the full coordinates`() {
+    @Test fun `changes a version when matched by the full module version`() {
       // Given
       val buildScript =
         """
@@ -59,7 +59,7 @@ internal class DependenciesMutatorSpec {
       assertThat(mutator.rewritten()).contains("""implementation("com.squareup.okhttp3:okhttp:5.5.1")""")
     }
 
-    @Test fun `leaves a declaration alone when the full coordinates name a different version`() {
+    @Test fun `leaves a declaration alone when the full module version names a different version`() {
       // Given
       val buildScript =
         """

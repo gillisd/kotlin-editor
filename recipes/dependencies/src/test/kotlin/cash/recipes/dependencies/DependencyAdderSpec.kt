@@ -565,7 +565,7 @@ internal class DependencyAdderSpec {
       assertThat(adder.rewritten()).isEqualTo(buildScript)
     }
 
-    @Test fun `still adds the same coordinates on a different configuration`() {
+    @Test fun `still adds the same module on a different configuration`() {
       // When okio is also asked for on testImplementation
       val adder = DependencyAdder.of(
         buildScript,
@@ -688,14 +688,14 @@ internal class DependencyAdderSpec {
         .isInstanceOf(KotlinParseException::class.java)
     }
 
-    @Test fun `throws when coordinates are not group-colon-name with an optional version`() {
+    @Test fun `throws when a module version is not group-colon-name with an optional version`() {
       val buildScript = "dependencies {}"
 
       listOf("okio", "com.squareup.okio:okio:3.9.0:extra", "com.squareup okio:okio", "", "a:\"b\"").forEach { bad ->
         assertThatThrownBy { DependencyAdder.of(buildScript, listOf(Addition("implementation", StringLiteral(bad)))) }
-          .describedAs("coordinates '%s'", bad)
+          .describedAs("module version '%s'", bad)
           .isInstanceOf(IllegalArgumentException::class.java)
-          .hasMessageContaining("Invalid coordinates")
+          .hasMessageContaining("Invalid module version")
       }
     }
 

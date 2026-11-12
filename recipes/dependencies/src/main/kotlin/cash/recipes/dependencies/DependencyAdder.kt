@@ -192,13 +192,13 @@ public class DependencyAdder private constructor(
     /** Compares dependencies by configuration, capability and `group:name` (ignoring the version), or by accessor. */
     private fun key(configuration: String, capability: Capability, rendered: String): String {
       val text = rendered.removeSurrounding("\"")
-      val coordinates = if (':' in text) text.split(':').take(2).joinToString(":") else text
-      return "$configuration|$capability|$coordinates"
+      val module = if (':' in text) text.split(':').take(2).joinToString(":") else text
+      return "$configuration|$capability|$module"
     }
 
     private fun DependencyDeclaration.key(): String = key(configuration, capability, identifier.path)
 
-    private val coordinatesPattern = Regex("""[^\s:"]+:[^\s:"]+(:[^\s:"]+)?""")
+    private val moduleVersionPattern = Regex("""[^\s:"]+:[^\s:"]+(:[^\s:"]+)?""")
     private val accessorPattern = Regex("""[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)+""")
     private val configurationPattern = Regex("""[A-Za-z_][A-Za-z0-9_]*""")
 
@@ -212,8 +212,8 @@ public class DependencyAdder private constructor(
           "Invalid configuration name: '${addition.configuration}'"
         }
         when (val dependency = addition.dependency) {
-          is Transform.Element.StringLiteral -> require(coordinatesPattern.matches(dependency.value)) {
-            "Invalid coordinates: '${dependency.value}'. Expected 'group:name' or 'group:name:version'."
+          is Transform.Element.StringLiteral -> require(moduleVersionPattern.matches(dependency.value)) {
+            "Invalid module version: '${dependency.value}'. Expected 'group:name' or 'group:name:version'."
           }
           is Transform.Element.Accessor -> require(accessorPattern.matches(dependency.value)) {
             "Invalid accessor: '${dependency.value}'. Expected something like 'libs.foo.bar'."
@@ -233,7 +233,7 @@ public class DependencyAdder private constructor(
     /**
      * Returns a [DependencyAdder], which eagerly parses [buildScript].
      *
-     * @throws IllegalArgumentException if an addition is malformed (configuration, coordinates or accessor), if two
+     * @throws IllegalArgumentException if an addition is malformed (configuration, module version or accessor), if two
      *   additions ask for the same dependency with different versions, or if [DependencyExtractor] sees an expression
      *   it doesn't understand.
      * @throws IllegalStateException if [DependencyExtractor] sees an expression it doesn't understand.
@@ -246,7 +246,7 @@ public class DependencyAdder private constructor(
     /**
      * Returns a [DependencyAdder], which eagerly parses [buildScript].
      *
-     * @throws IllegalArgumentException if an addition is malformed (configuration, coordinates or accessor), if two
+     * @throws IllegalArgumentException if an addition is malformed (configuration, module version or accessor), if two
      *   additions ask for the same dependency with different versions, or if [DependencyExtractor] sees an expression
      *   it doesn't understand.
      * @throws IllegalStateException if [DependencyExtractor] sees an expression it doesn't understand.

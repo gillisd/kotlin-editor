@@ -114,6 +114,23 @@ Some sample recipes are in the `recipes` directory. Feel free to contribute new 
 believe them to be generally useful; otherwise, simply treat this library as a normal dependency for
 your own projects.
 
+### Added on this fork
+
+This fork adds recipes that upstream does not have. Each follows the existing pattern: `X.of(script, …)`
+parses the script and `rewritten()` returns the new text.
+
+| Recipe | What it does |
+| --- | --- |
+| `DependencyAdder` | Adds declarations to the top-level `dependencies` block, after the last one on the same configuration |
+| `DependencyRemover` | Removes declarations, matched by `group:name` or by accessor, from one configuration or all |
+| `PluginVersionMutator` | Changes plugin versions in the top-level `plugins` block |
+
+`DependenciesMutator` also keeps `platform()`, `enforcedPlatform()` and `testFixtures()` around a dependency
+it rewrites; upstream drops them.
+
+The [`build-script`](build-script/README.md) module is a planned layer over these recipes. It has a README and
+pending specs, and no implementation yet.
+
 ### Gradle build scans
 
 This project is configured to publish build scans to the public

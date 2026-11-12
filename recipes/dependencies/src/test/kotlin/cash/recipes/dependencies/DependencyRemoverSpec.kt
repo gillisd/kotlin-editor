@@ -365,14 +365,14 @@ internal class DependencyRemoverSpec {
         .isInstanceOf(KotlinParseException::class.java)
     }
 
-    @Test fun `throws when coordinates are not group-colon-name`() {
+    @Test fun `throws when a module is not group-colon-name`() {
       val buildScript = "dependencies {}"
 
       listOf("okhttp", "com.squareup.okhttp3:okhttp:5.5.1", "com.squareup okhttp3:okhttp", "").forEach { bad ->
         assertThatThrownBy { DependencyRemover.of(buildScript, listOf(Removal(StringLiteral(bad)))) }
-          .describedAs("coordinates '%s'", bad)
+          .describedAs("module '%s'", bad)
           .isInstanceOf(IllegalArgumentException::class.java)
-          .hasMessageContaining("Invalid coordinates")
+          .hasMessageContaining("Invalid module")
       }
     }
   }

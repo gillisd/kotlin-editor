@@ -41,7 +41,7 @@ public class DependencyRemover private constructor(
   ) {
     internal fun matches(declaration: DependencyDeclaration): Boolean =
       (configuration == null || configuration == declaration.configuration) &&
-        coordinates(dependency.render()) == coordinates(declaration.identifier.path)
+        withoutVersion(dependency.render()) == withoutVersion(declaration.identifier.path)
   }
 
   private val dependencyExtractor = DependencyExtractor(input, tokens, indent)
@@ -152,8 +152,8 @@ public class DependencyRemover private constructor(
     private val accessorPattern = Regex("""[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)+""")
     private val configurationPattern = Regex("""[A-Za-z_][A-Za-z0-9_]*""")
 
-    /** `group:name` for a coordinate string (version dropped, quotes ignored), or the accessor itself. */
-    private fun coordinates(rendered: String): String {
+    /** `group:name` for a module version string (version dropped, quotes ignored), or the accessor itself. */
+    private fun withoutVersion(rendered: String): String {
       val text = rendered.removeSurrounding("\"")
       return if (':' in text) text.split(':').take(2).joinToString(":") else text
     }
@@ -176,7 +176,7 @@ public class DependencyRemover private constructor(
         }
         when (val dependency = removal.dependency) {
           is Transform.Element.StringLiteral -> require(modulePattern.matches(dependency.value)) {
-            "Invalid coordinates: '${dependency.value}'. Expected 'group:name' (no version)."
+            "Invalid module: '${dependency.value}'. Expected 'group:name' (no version)."
           }
           is Transform.Element.Accessor -> require(accessorPattern.matches(dependency.value)) {
             "Invalid accessor: '${dependency.value}'. Expected something like 'libs.foo.bar'."
