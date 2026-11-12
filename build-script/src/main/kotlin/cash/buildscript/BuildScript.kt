@@ -11,6 +11,9 @@ import cash.grammar.kotlindsl.utils.Context.leafRule
 import cash.grammar.kotlindsl.utils.DependencyExtractor
 import cash.grammar.kotlindsl.utils.PluginExtractor
 import cash.grammar.kotlindsl.utils.Whitespace
+import cash.recipes.dependencies.DependencyAdder
+import cash.recipes.dependencies.transform.Transform
+import cash.recipes.plugins.PluginAdder
 import com.squareup.cash.grammar.KotlinParser.NamedBlockContext
 import com.squareup.cash.grammar.KotlinParser.ScriptContext
 import com.squareup.cash.grammar.KotlinParserBaseListener
@@ -43,7 +46,165 @@ public class BuildScript private constructor(private val file: Path, source: Str
 
   private class Declared(val dependencies: List<Dependency>, val pluginDependencies: List<PluginDependency>)
 
+  /**
+   * Adds [dependency] after the last declaration on the same [Configuration]. Changes nothing when it is already
+   * declared there.
+   *
+   * @throws ConflictingVersion if its [Module] is declared there at a different [Version]; use `pin` to change it.
+   * @throws UnreadableDependency if a name in it cannot be written.
+   */
+  public fun add(dependency: Dependency) {
+    if (dependency is ExternalModuleDependency) {
+      val wanted = dependency.moduleVersion
+      val declared = dependencies.filterIsInstance<ExternalModuleDependency>().firstOrNull {
+        it.configuration == dependency.configuration && it.modifier == dependency.modifier &&
+          it.moduleVersion.module == wanted.module
+      }
+      if (declared != null) {
+        if (wanted.version is RequiredVersion && wanted.version != declared.moduleVersion.version) {
+          throw ConflictingVersion(
+            "${wanted.module.written()} is declared on ${dependency.configuration.name} " +
+              "${declared.moduleVersion.version.written()}, not ${wanted.version.written()}. " +
+              "Use pin to change its Version."
+          )
+        }
+        return
+      }
+    }
+
+    val written = when (dependency) {
+      is ExternalModuleDependency -> Transform.Element.StringLiteral(dependency.moduleVersion.written())
+      is CatalogDependency -> Transform.Element.Accessor(dependency.accessor.path)
+      is ProjectDependency -> Transform.Element.StringLiteral(dependency.projectPath.path)
+    }
+    val capability = when (dependency.modifier) {
+      DependencyModifier.Unmodified -> Capability.DEFAULT
+      DependencyModifier.Platform -> Capability.PLATFORM
+      DependencyModifier.EnforcedPlatform -> Capability.ENFORCED_PLATFORM
+      DependencyModifier.TestFixtures -> Capability.TEST_FIXTURES
+    }
+    val addition = DependencyAdder.Addition(dependency.configuration.name, written, capability)
+    rewrite { DependencyAdder.of(source, listOf(addition)).rewritten() }
+  }
+
+  /**
+   * Adds the dependency that [dependency] describes by its shape: `group:name:version`, `group:name`, a type-safe
+   * accessor such as `libs.okio`, or a project path such as `:core`. The [version] may be named instead of written
+   * as the third segment.
+   *
+   * @throws UnreadableDependency if the string has none of those shapes, if the version is given twice, or if a
+   *   version is named for an accessor or a project path.
+   * @throws ConflictingVersion if its [Module] is declared there at a different [Version].
+   */
+  @JvmOverloads
+  public fun add(
+    dependency: String,
+    version: String? = null,
+    configuration: String = "implementation",
+    modifier: DependencyModifier = DependencyModifier.Unmodified,
+  ) {
+    val named = Configuration(configuration)
+    add(
+      when (val shape = shapeOf(dependency, version)) {
+        is ModuleVersion -> ExternalModuleDependency(named, shape, modifier)
+        is TypeSafeAccessor -> CatalogDependency(named, shape, modifier)
+        is ProjectPath -> ProjectDependency(named, shape, modifier)
+        else -> error("unreachable")
+      }
+    )
+  }
+
+  /**
+   * Adds [pluginDependency] after the last entry in the plugins block. Changes nothing when it is already there.
+   *
+   * @throws ConflictingVersion if that [PluginId] is declared at a different [Version]; use `pin` to change it.
+   * @throws UnreadableDependency if a name in it cannot be written.
+   */
+  public fun add(pluginDependency: PluginDependency) {
+    val addition = when (pluginDependency) {
+      is CatalogPlugin -> PluginAdder.Addition.ByAlias(pluginDependency.accessor.path)
+      is Plugin -> {
+        val declared = pluginDependencies.filterIsInstance<Plugin>().firstOrNull { it.pluginId == pluginDependency.pluginId }
+        if (declared != null) {
+          if (pluginDependency.version is RequiredVersion && pluginDependency.version != declared.version) {
+            throw ConflictingVersion(
+              "${pluginDependency.pluginId.id} is declared ${declared.version.written()}, " +
+                "not ${pluginDependency.version.written()}. Use pin to change its Version."
+            )
+          }
+          return
+        }
+        PluginAdder.Addition.ById(pluginDependency.pluginId.id, (pluginDependency.version as? RequiredVersion)?.text)
+      }
+    }
+    rewrite { PluginAdder.of(source, listOf(addition)).rewritten() }
+  }
+
+  /** Adds the [Plugin] with this [pluginId], at [version] when one is named. */
+  @JvmOverloads
+  public fun add(pluginId: PluginId, version: String? = null) {
+    add(Plugin(pluginId, version?.let(::RequiredVersion) ?: UnspecifiedVersion))
+  }
+
+  /** Runs a recipe on the current source and reads the result back into parts. */
+  private fun rewrite(recipe: () -> String) {
+    val rewritten = try {
+      recipe()
+    } catch (e: IllegalArgumentException) {
+      throw UnreadableDependency(e.message ?: "The recipe rejected its input.")
+    }
+    if (rewritten != source) {
+      declared = read(rewritten)
+      source = rewritten
+    }
+  }
+
+  /** The [ModuleVersion], [TypeSafeAccessor] or [ProjectPath] that [dependency] is, going by its shape. */
+  private fun shapeOf(dependency: String, version: String?): Any {
+    fun unreadable(why: String): Nothing = throw UnreadableDependency("Cannot read '$dependency': $why")
+    return when {
+      dependency.startsWith(':') -> {
+        if (version != null) unreadable("a project path has no Version.")
+        if (!projectPathPattern.matches(dependency)) unreadable("it is not a project path such as ':core'.")
+        ProjectPath(dependency)
+      }
+      ':' in dependency -> {
+        val segments = dependency.split(':')
+        if (segments.size !in 2..3 || segments.any { !segmentPattern.matches(it) }) {
+          unreadable("expected 'group:name' or 'group:name:version'.")
+        }
+        if (segments.size == 3 && version != null) unreadable("its Version is given twice.")
+        val named = (segments.getOrNull(2) ?: version)?.let(::RequiredVersion) ?: UnspecifiedVersion
+        ModuleVersion(Module(segments[0], segments[1]), named)
+      }
+      accessorPattern.matches(dependency) -> {
+        if (version != null) unreadable("a type-safe accessor has its Version in the Version Catalog.")
+        TypeSafeAccessor(dependency)
+      }
+      else -> unreadable(
+        "expected 'group:name:version', 'group:name', a type-safe accessor such as 'libs.okio', " +
+          "or a project path such as ':core'."
+      )
+    }
+  }
+
   public companion object {
+    private val segmentPattern = Regex("""[^\s:"]+""")
+    private val projectPathPattern = Regex("""(:[^\s:"]+)+""")
+    private val accessorPattern = Regex("""[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)+""")
+
+    private fun Module.written(): String = "$group:$name"
+
+    private fun ModuleVersion.written(): String = when (version) {
+      is RequiredVersion -> "${module.written()}:${version.text}"
+      UnspecifiedVersion -> module.written()
+    }
+
+    private fun Version.written(): String = when (this) {
+      is RequiredVersion -> "at $text"
+      UnspecifiedVersion -> "with no Version"
+    }
+
     /**
      * Reads and parses [file].
      *

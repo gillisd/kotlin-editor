@@ -169,6 +169,41 @@ internal class DependencyAdderSpec {
       )
     }
 
+    @Test fun `writes a string literal that starts with a colon as a project dependency`() {
+      // Given a script that already depends on one project
+      val buildScript =
+        """
+          dependencies {
+            implementation(project(":core"))
+            testImplementation("org.junit.jupiter:junit-jupiter:5.11.0")
+          }
+        """.trimIndent()
+
+      // When one project is new, one is already declared, and one is nested and wrapped
+      val core = Addition("implementation", StringLiteral(":core"))
+      val adder = DependencyAdder.of(
+        buildScript,
+        listOf(
+          Addition("implementation", StringLiteral(":libs:network")),
+          core,
+          Addition("testImplementation", StringLiteral(":core"), Capability.TEST_FIXTURES),
+        ),
+      )
+
+      // Then
+      assertThat(adder.rewritten()).isEqualTo(
+        """
+          dependencies {
+            implementation(project(":core"))
+            implementation(project(":libs:network"))
+            testImplementation("org.junit.jupiter:junit-jupiter:5.11.0")
+            testImplementation(testFixtures(project(":core")))
+          }
+        """.trimIndent()
+      )
+      assertThat(adder.skipped()).containsExactly(core)
+    }
+
     @Test fun `adds to an empty multi-line dependencies block`() {
       // Given an empty block whose only content is a comment
       val buildScript =

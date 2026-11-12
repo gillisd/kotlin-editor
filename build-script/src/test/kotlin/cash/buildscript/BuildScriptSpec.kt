@@ -29,6 +29,22 @@ internal class BuildScriptSpec {
   private val implementation = Configuration("implementation")
   private val okio = Module("com.squareup.okio", "okio")
 
+  private val twoDependencies =
+    """
+      dependencies {
+        implementation("com.squareup.okio:okio:3.18.2")
+        testImplementation("org.junit.jupiter:junit-jupiter:6.1.3")
+      }
+    """.trimIndent()
+
+  private val twoPlugins =
+    """
+      plugins {
+        application
+        kotlin("jvm") version "2.2.0"
+      }
+    """.trimIndent()
+
   private fun open(source: String): BuildScript {
     val file = directory.resolve("build.gradle.kts")
     Files.writeString(file, source)
@@ -268,50 +284,267 @@ internal class BuildScriptSpec {
 
   @Nested inner class `adding a Dependency` {
 
-    @Disabled("pending") @Test fun `adds an ExternalModuleDependency after the last declaration on the same Configuration`() {}
+    @Test fun `adds an ExternalModuleDependency after the last declaration on the same Configuration`() {
+      val script = open(twoDependencies)
 
-    @Disabled("pending") @Test fun `adds a CatalogDependency`() {}
+      script.add(ExternalModuleDependency(implementation, ModuleVersion(Module("com.squareup.okhttp3", "okhttp"), RequiredVersion("5.5.1"))))
 
-    @Disabled("pending") @Test fun `adds a ProjectDependency`() {}
+      assertThat(script.source).isEqualTo(
+        """
+          dependencies {
+            implementation("com.squareup.okio:okio:3.18.2")
+            implementation("com.squareup.okhttp3:okhttp:5.5.1")
+            testImplementation("org.junit.jupiter:junit-jupiter:6.1.3")
+          }
+        """.trimIndent()
+      )
+      assertThat(script.dependencies).hasSize(3)
+    }
 
-    @Disabled("pending") @Test fun `writes the DependencyModifier around the dependency`() {}
+    @Test fun `adds a CatalogDependency`() {
+      val script = open(twoDependencies)
 
-    @Disabled("pending") @Test fun `creates the dependencies block when the script has none`() {}
+      script.add(CatalogDependency(Configuration("testImplementation"), TypeSafeAccessor("libs.assertj")))
 
-    @Disabled("pending") @Test fun `adds the same Module again on a different Configuration`() {}
+      assertThat(script.source).isEqualTo(
+        """
+          dependencies {
+            implementation("com.squareup.okio:okio:3.18.2")
+            testImplementation("org.junit.jupiter:junit-jupiter:6.1.3")
+            testImplementation(libs.assertj)
+          }
+        """.trimIndent()
+      )
+      assertThat(script.dependencies.last())
+        .isEqualTo(CatalogDependency(Configuration("testImplementation"), TypeSafeAccessor("libs.assertj")))
+    }
 
-    @Disabled("pending") @Test fun `changes nothing when the Module is on that Configuration at the same Version`() {}
+    @Test fun `adds a ProjectDependency`() {
+      val script = open(twoDependencies)
 
-    @Disabled("pending") @Test fun `fails with ConflictingVersion, pointing to pin, when the Module is on that Configuration at a different Version`() {}
+      script.add(ProjectDependency(implementation, ProjectPath(":core")))
+
+      assertThat(script.source).isEqualTo(
+        """
+          dependencies {
+            implementation("com.squareup.okio:okio:3.18.2")
+            implementation(project(":core"))
+            testImplementation("org.junit.jupiter:junit-jupiter:6.1.3")
+          }
+        """.trimIndent()
+      )
+    }
+
+    @Test fun `writes the DependencyModifier around the dependency`() {
+      val script = open(twoDependencies)
+
+      script.add(ExternalModuleDependency(Configuration("api"), ModuleVersion(Module("tools.jackson", "jackson-bom"), RequiredVersion("3.3.0")), Platform))
+      script.add(ProjectDependency(Configuration("testImplementation"), ProjectPath(":core"), TestFixtures))
+
+      assertThat(script.source).isEqualTo(
+        """
+          dependencies {
+            implementation("com.squareup.okio:okio:3.18.2")
+            testImplementation("org.junit.jupiter:junit-jupiter:6.1.3")
+            testImplementation(testFixtures(project(":core")))
+            api(platform("tools.jackson:jackson-bom:3.3.0"))
+          }
+        """.trimIndent()
+      )
+    }
+
+    @Test fun `creates the dependencies block when the script has none`() {
+      val script = open(twoPlugins)
+
+      script.add(ExternalModuleDependency(implementation, ModuleVersion(okio, RequiredVersion("3.18.2"))))
+
+      assertThat(script.source).isEqualTo(
+        """
+          plugins {
+            application
+            kotlin("jvm") version "2.2.0"
+          }
+
+          dependencies {
+            implementation("com.squareup.okio:okio:3.18.2")
+          }
+        """.trimIndent()
+      )
+    }
+
+    @Test fun `adds the same Module again on a different Configuration`() {
+      val script = open(twoDependencies)
+
+      script.add(ExternalModuleDependency(Configuration("testImplementation"), ModuleVersion(okio, RequiredVersion("3.18.2"))))
+
+      assertThat(script.dependencies.filterIsInstance<ExternalModuleDependency>().filter { it.moduleVersion.module == okio }.map { it.configuration.name })
+        .containsExactly("implementation", "testImplementation")
+    }
+
+    @Test fun `changes nothing when the Module is on that Configuration at the same Version`() {
+      val script = open(twoDependencies)
+
+      script.add(ExternalModuleDependency(implementation, ModuleVersion(okio, RequiredVersion("3.18.2"))))
+      // Asking for it with no Version is also satisfied by what is declared.
+      script.add(ExternalModuleDependency(implementation, ModuleVersion(okio, UnspecifiedVersion)))
+
+      assertThat(script.source).isEqualTo(twoDependencies)
+
+      // A CatalogDependency or a ProjectDependency that is already declared is not written twice.
+      script.add("libs.assertj", configuration = "testImplementation")
+      script.add(":core")
+      val once = script.source
+      script.add("libs.assertj", configuration = "testImplementation")
+      script.add(":core")
+
+      assertThat(script.source).isEqualTo(once)
+    }
+
+    @Test fun `fails with ConflictingVersion, pointing to pin, when the Module is on that Configuration at a different Version`() {
+      val script = open(twoDependencies)
+
+      assertThatThrownBy { script.add(ExternalModuleDependency(implementation, ModuleVersion(okio, RequiredVersion("3.19.0")))) }
+        .isInstanceOf(ConflictingVersion::class.java)
+        .hasMessageContaining("com.squareup.okio:okio")
+        .hasMessageContaining("at 3.18.2")
+        .hasMessageContaining("pin")
+      assertThat(script.source).isEqualTo(twoDependencies)
+    }
   }
 
   @Nested inner class `adding a Dependency from a string` {
 
-    @Disabled("pending") @Test fun `reads three segments as a Group, a Name and a RequiredVersion`() {}
+    @Test fun `reads three segments as a Group, a Name and a RequiredVersion`() {
+      val script = open(twoDependencies)
 
-    @Disabled("pending") @Test fun `reads two segments as a Group and a Name with UnspecifiedVersion`() {}
+      script.add("com.squareup.okhttp3:okhttp:5.5.1")
 
-    @Disabled("pending") @Test fun `reads a dotted string with no colon as a TypeSafeAccessor`() {}
+      assertThat(script.dependencies).contains(
+        ExternalModuleDependency(implementation, ModuleVersion(Module("com.squareup.okhttp3", "okhttp"), RequiredVersion("5.5.1")))
+      )
+      assertThat(script.source).contains("""implementation("com.squareup.okhttp3:okhttp:5.5.1")""")
+    }
 
-    @Disabled("pending") @Test fun `reads a string that starts with a colon as a ProjectPath`() {}
+    @Test fun `reads two segments as a Group and a Name with UnspecifiedVersion`() {
+      val script = open(twoDependencies)
 
-    @Disabled("pending") @Test fun `takes the Version as a named argument instead of a third segment`() {}
+      script.add("org.junit.platform:junit-platform-launcher", configuration = "testRuntimeOnly")
 
-    @Disabled("pending") @Test fun `uses the implementation Configuration when none is named`() {}
+      assertThat(script.dependencies).contains(
+        ExternalModuleDependency(
+          Configuration("testRuntimeOnly"),
+          ModuleVersion(Module("org.junit.platform", "junit-platform-launcher"), UnspecifiedVersion),
+        )
+      )
+      assertThat(script.source).contains("""testRuntimeOnly("org.junit.platform:junit-platform-launcher")""")
+    }
 
-    @Disabled("pending") @Test fun `uses the Configuration that is named`() {}
+    @Test fun `reads a dotted string with no colon as a TypeSafeAccessor`() {
+      val script = open(twoDependencies)
 
-    @Disabled("pending") @Test fun `uses Unmodified when no DependencyModifier is named`() {}
+      script.add("libs.okhttp")
 
-    @Disabled("pending") @Test fun `uses the DependencyModifier that is named`() {}
+      assertThat(script.dependencies).contains(CatalogDependency(implementation, TypeSafeAccessor("libs.okhttp")))
+      assertThat(script.source).contains("implementation(libs.okhttp)")
+    }
 
-    @Disabled("pending") @Test fun `writes the string as given without checking that it resolves`() {}
+    @Test fun `reads a string that starts with a colon as a ProjectPath`() {
+      val script = open(twoDependencies)
 
-    @Disabled("pending") @Test fun `fails with UnreadableDependency when the string has none of the four shapes`() {}
+      script.add(":libs:network")
 
-    @Disabled("pending") @Test fun `fails with UnreadableDependency when the Version is given both in the string and as a named argument`() {}
+      assertThat(script.dependencies).contains(ProjectDependency(implementation, ProjectPath(":libs:network")))
+      assertThat(script.source).contains("""implementation(project(":libs:network"))""")
+    }
 
-    @Disabled("pending") @Test fun `fails with UnreadableDependency when a Version is named for a TypeSafeAccessor or a ProjectPath`() {}
+    @Test fun `takes the Version as a named argument instead of a third segment`() {
+      val script = open(twoDependencies)
+
+      script.add("com.squareup.okhttp3:okhttp", version = "5.5.1")
+
+      assertThat(script.source).contains("""implementation("com.squareup.okhttp3:okhttp:5.5.1")""")
+    }
+
+    @Test fun `uses the implementation Configuration when none is named`() {
+      val script = open(twoDependencies)
+
+      script.add("com.squareup.okhttp3:okhttp:5.5.1")
+
+      assertThat(script.dependencies.last { it is ExternalModuleDependency && it.moduleVersion.module.name == "okhttp" }.configuration)
+        .isEqualTo(implementation)
+    }
+
+    @Test fun `uses the Configuration that is named`() {
+      val script = open(twoDependencies)
+
+      script.add("org.assertj:assertj-core:3.27.7", configuration = "testImplementation")
+
+      assertThat(script.source).isEqualTo(
+        """
+          dependencies {
+            implementation("com.squareup.okio:okio:3.18.2")
+            testImplementation("org.junit.jupiter:junit-jupiter:6.1.3")
+            testImplementation("org.assertj:assertj-core:3.27.7")
+          }
+        """.trimIndent()
+      )
+    }
+
+    @Test fun `uses Unmodified when no DependencyModifier is named`() {
+      val script = open(twoDependencies)
+
+      script.add("com.squareup.okhttp3:okhttp:5.5.1")
+
+      assertThat(script.dependencies.map { it.modifier }).containsOnly(Unmodified)
+    }
+
+    @Test fun `uses the DependencyModifier that is named`() {
+      val script = open(twoDependencies)
+
+      script.add("tools.jackson:jackson-bom:3.3.0", configuration = "api", modifier = Platform)
+      script.add("libs.bom", configuration = "api", modifier = EnforcedPlatform)
+
+      assertThat(script.source).contains("""api(platform("tools.jackson:jackson-bom:3.3.0"))""")
+      assertThat(script.source).contains("api(enforcedPlatform(libs.bom))")
+    }
+
+    @Test fun `writes the string as given without checking that it resolves`() {
+      val script = open(twoDependencies)
+
+      // A Version where the Name should be, and an accessor no catalog defines: both are written as given.
+      script.add("com.squareup.okio:3.18.2", configuration = "api")
+      script.add("libs.does.not.exist")
+
+      assertThat(script.source).contains("""api("com.squareup.okio:3.18.2")""")
+      assertThat(script.source).contains("implementation(libs.does.not.exist)")
+    }
+
+    @Test fun `fails with UnreadableDependency when the string has none of the four shapes`() {
+      val script = open(twoDependencies)
+
+      listOf("okio", "", "a:b:c:d", "a::1", "com.squareup okio:okio", ":", "a:b:1 0").forEach { unreadable ->
+        assertThatThrownBy { script.add(unreadable) }
+          .describedAs("'%s'", unreadable)
+          .isInstanceOf(UnreadableDependency::class.java)
+      }
+      assertThat(script.source).isEqualTo(twoDependencies)
+    }
+
+    @Test fun `fails with UnreadableDependency when the Version is given both in the string and as a named argument`() {
+      val script = open(twoDependencies)
+
+      assertThatThrownBy { script.add("com.squareup.okhttp3:okhttp:5.5.1", version = "5.5.1") }
+        .isInstanceOf(UnreadableDependency::class.java)
+        .hasMessageContaining("twice")
+    }
+
+    @Test fun `fails with UnreadableDependency when a Version is named for a TypeSafeAccessor or a ProjectPath`() {
+      val script = open(twoDependencies)
+
+      assertThatThrownBy { script.add("libs.okhttp", version = "5.5.1") }.isInstanceOf(UnreadableDependency::class.java)
+      assertThatThrownBy { script.add(":core", version = "1.0") }.isInstanceOf(UnreadableDependency::class.java)
+      assertThat(script.source).isEqualTo(twoDependencies)
+    }
   }
 
   @Nested inner class `pinning a ModuleVersion` {
@@ -354,15 +587,80 @@ internal class BuildScriptSpec {
 
   @Nested inner class `adding a PluginDependency` {
 
-    @Disabled("pending") @Test fun `adds a Plugin to the plugins block`() {}
+    @Test fun `adds a Plugin to the plugins block`() {
+      val script = open(twoPlugins)
 
-    @Disabled("pending") @Test fun `adds a CatalogPlugin`() {}
+      script.add(Plugin(PluginId("org.graalvm.buildtools.native"), RequiredVersion("1.1.18")))
 
-    @Disabled("pending") @Test fun `creates the plugins block when the script has none`() {}
+      assertThat(script.source).isEqualTo(
+        """
+          plugins {
+            application
+            kotlin("jvm") version "2.2.0"
+            id("org.graalvm.buildtools.native") version "1.1.18"
+          }
+        """.trimIndent()
+      )
+      assertThat(script.pluginDependencies.last())
+        .isEqualTo(Plugin(PluginId("org.graalvm.buildtools.native"), RequiredVersion("1.1.18")))
+    }
 
-    @Disabled("pending") @Test fun `changes nothing when that PluginId is there at the same Version`() {}
+    @Test fun `adds a CatalogPlugin`() {
+      val script = open(twoPlugins)
 
-    @Disabled("pending") @Test fun `fails with ConflictingVersion, pointing to pin, when that PluginId is there at a different Version`() {}
+      script.add(CatalogPlugin(TypeSafeAccessor("libs.plugins.shadow")))
+      script.add(CatalogPlugin(TypeSafeAccessor("libs.plugins.shadow")))
+
+      assertThat(script.source).isEqualTo(
+        """
+          plugins {
+            application
+            kotlin("jvm") version "2.2.0"
+            alias(libs.plugins.shadow)
+          }
+        """.trimIndent()
+      )
+    }
+
+    @Test fun `creates the plugins block when the script has none`() {
+      val script = open(twoDependencies)
+
+      script.add(Plugin(PluginId("application")))
+
+      assertThat(script.source).isEqualTo(
+        """
+          plugins {
+            id("application")
+          }
+
+        """.trimIndent() + "\n" + twoDependencies
+      )
+    }
+
+    @Test fun `changes nothing when that PluginId is there at the same Version`() {
+      val script = open(twoPlugins)
+
+      script.add(Plugin(PluginId("org.jetbrains.kotlin.jvm"), RequiredVersion("2.2.0")))
+      script.add(Plugin(PluginId("application")))
+      // Asking for it with no Version is also satisfied by what is declared.
+      script.add(Plugin(PluginId("org.jetbrains.kotlin.jvm")))
+
+      assertThat(script.source).isEqualTo(twoPlugins)
+    }
+
+    @Test fun `fails with ConflictingVersion, pointing to pin, when that PluginId is there at a different Version`() {
+      val script = open(twoPlugins)
+
+      assertThatThrownBy { script.add(Plugin(PluginId("org.jetbrains.kotlin.jvm"), RequiredVersion("2.2.21"))) }
+        .isInstanceOf(ConflictingVersion::class.java)
+        .hasMessageContaining("org.jetbrains.kotlin.jvm")
+        .hasMessageContaining("at 2.2.0")
+        .hasMessageContaining("pin")
+      // A plugin declared with no Version conflicts with a request for one.
+      assertThatThrownBy { script.add(Plugin(PluginId("application"), RequiredVersion("1.0"))) }
+        .isInstanceOf(ConflictingVersion::class.java)
+      assertThat(script.source).isEqualTo(twoPlugins)
+    }
   }
 
   @Nested inner class `pinning a Plugin` {
@@ -389,9 +687,23 @@ internal class BuildScriptSpec {
 
   @Nested inner class `naming a plugin by its PluginId` {
 
-    @Disabled("pending") @Test fun `adds a Plugin from a PluginId and a named Version`() {}
+    @Test fun `adds a Plugin from a PluginId and a named Version`() {
+      val script = open(twoPlugins)
 
-    @Disabled("pending") @Test fun `adds a Plugin from a PluginId alone, with UnspecifiedVersion`() {}
+      script.add(PluginId("com.example.plugin"), version = "2.0")
+
+      assertThat(script.source).contains("""id("com.example.plugin") version "2.0"""")
+      assertThat(script.pluginDependencies).contains(Plugin(PluginId("com.example.plugin"), RequiredVersion("2.0")))
+    }
+
+    @Test fun `adds a Plugin from a PluginId alone, with UnspecifiedVersion`() {
+      val script = open(twoPlugins)
+
+      script.add(PluginId("com.example.convention"))
+
+      assertThat(script.source).contains("""id("com.example.convention")""")
+      assertThat(script.pluginDependencies).contains(Plugin(PluginId("com.example.convention"), UnspecifiedVersion))
+    }
 
     @Disabled("pending") @Test fun `pins a Plugin from a PluginId and a named Version`() {}
 
