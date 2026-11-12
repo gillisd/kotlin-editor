@@ -12,9 +12,11 @@ import cash.grammar.kotlindsl.utils.DependencyExtractor
 import cash.grammar.kotlindsl.utils.PluginExtractor
 import cash.grammar.kotlindsl.utils.Whitespace
 import cash.recipes.dependencies.DependencyAdder
+import cash.recipes.dependencies.DependencyRemover
 import cash.recipes.dependencies.DependencyVersionMutator
 import cash.recipes.dependencies.transform.Transform
 import cash.recipes.plugins.PluginAdder
+import cash.recipes.plugins.PluginRemover
 import cash.recipes.plugins.PluginVersionMutator
 import com.squareup.cash.grammar.KotlinParser.NamedBlockContext
 import com.squareup.cash.grammar.KotlinParser.ScriptContext
@@ -37,6 +39,9 @@ public class BuildScript private constructor(private val file: Path, source: Str
   /** The script's current text. */
   public var source: String = source
     private set
+
+  // The text that is in the file.
+  private var saved: String = source
 
   private var declared: Declared = read(source)
 
@@ -220,13 +225,92 @@ public class BuildScript private constructor(private val file: Path, source: Str
     pin(Plugin(pluginId, RequiredVersion(version)))
   }
 
-  /** Runs a recipe on the current source and reads the result back into parts. */
-  private fun rewrite(recipe: () -> String) {
-    val rewritten = try {
-      recipe()
-    } catch (e: IllegalArgumentException) {
-      throw UnreadableDependency(e.message ?: "The recipe rejected its input.")
+  /**
+   * Removes [dependency] from its [Configuration], with its line. An [ExternalModuleDependency] is matched on its
+   * [Module], whatever the [Version].
+   *
+   * @throws UndeclaredDependency if it is not declared on that [Configuration].
+   */
+  public fun remove(dependency: Dependency) {
+    val named = when (dependency) {
+      is ExternalModuleDependency -> Transform.Element.StringLiteral(dependency.moduleVersion.module.written())
+      is CatalogDependency -> Transform.Element.Accessor(dependency.accessor.path)
+      is ProjectDependency -> Transform.Element.StringLiteral(dependency.projectPath.path)
     }
+    remove(named, dependency.configuration)
+  }
+
+  /**
+   * Removes the dependency that [dependency] describes by its shape, as `add` reads it; a version in the string is
+   * ignored. It is removed from the [configuration] that is named, or from every one when none is.
+   *
+   * @throws UnreadableDependency if the string has none of the shapes.
+   * @throws UndeclaredDependency if it is not declared.
+   */
+  @JvmOverloads
+  public fun remove(dependency: String, configuration: String? = null) {
+    val named = when (val shape = shapeOf(dependency, version = null)) {
+      is ModuleVersion -> Transform.Element.StringLiteral(shape.module.written())
+      is TypeSafeAccessor -> Transform.Element.Accessor(shape.path)
+      is ProjectPath -> Transform.Element.StringLiteral(shape.path)
+      else -> error("unreachable")
+    }
+    remove(named, configuration?.let(::Configuration))
+  }
+
+  private fun remove(named: Transform.Element, configuration: Configuration?) {
+    val remover = recipe { DependencyRemover.of(source, listOf(DependencyRemover.Removal(named, configuration?.name))) }
+    if (remover.notFound().isNotEmpty()) {
+      val where = configuration?.let { " on ${it.name}" } ?: ""
+      throw UndeclaredDependency("${named.value()} is not declared$where.")
+    }
+    rewrite { remover.rewritten() }
+  }
+
+  /**
+   * Removes [pluginDependency] from the plugins block, with its line. A [Plugin] is matched on its [PluginId],
+   * whatever the [Version].
+   *
+   * @throws UndeclaredPlugin if it is not declared.
+   */
+  public fun remove(pluginDependency: PluginDependency) {
+    val removal = when (pluginDependency) {
+      is Plugin -> PluginRemover.Removal.ById(pluginDependency.pluginId.id)
+      is CatalogPlugin -> PluginRemover.Removal.ByAlias(pluginDependency.accessor.path)
+    }
+    val remover = recipe { PluginRemover.of(source, listOf(removal)) }
+    if (remover.notFound().isNotEmpty()) {
+      val name = when (pluginDependency) {
+        is Plugin -> pluginDependency.pluginId.id
+        is CatalogPlugin -> pluginDependency.accessor.path
+      }
+      throw UndeclaredPlugin("$name is not declared.")
+    }
+    rewrite { remover.rewritten() }
+  }
+
+  /** Removes the [Plugin] with this [pluginId], whatever its [Version]. */
+  public fun remove(pluginId: PluginId) {
+    remove(Plugin(pluginId))
+  }
+
+  /** Writes [source] back to the file the script was opened from. Does nothing when nothing has changed. */
+  public fun save() {
+    if (source == saved) return
+    Files.writeString(file, source)
+    saved = source
+  }
+
+  /** Builds or runs a recipe; a name the recipe rejects is an [UnreadableDependency]. */
+  private fun <T> recipe(use: () -> T): T = try {
+    use()
+  } catch (e: IllegalArgumentException) {
+    throw UnreadableDependency(e.message ?: "The recipe rejected its input.")
+  }
+
+  /** Runs a recipe on the current source and reads the result back into parts. */
+  private fun rewrite(rewriting: () -> String) {
+    val rewritten = recipe(rewriting)
     if (rewritten != source) {
       declared = read(rewritten)
       source = rewritten
@@ -268,6 +352,11 @@ public class BuildScript private constructor(private val file: Path, source: Str
     private val accessorPattern = Regex("""[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)+""")
 
     private fun Module.written(): String = "$group:$name"
+
+    private fun Transform.Element.value(): String = when (this) {
+      is Transform.Element.StringLiteral -> value
+      is Transform.Element.Accessor -> value
+    }
 
     private fun ModuleVersion.written(): String = when (version) {
       is RequiredVersion -> "${module.written()}:${version.text}"

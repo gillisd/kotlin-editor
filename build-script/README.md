@@ -19,10 +19,7 @@ Comments, spacing, and everything else stay exactly as written
 
 Works with dependencies and plugins in Kotlin DSL build scripts
 
-> **Status: in progress.** Opening a script and listing its dependencies and plugins work today. `add`, `pin`,
-> `remove` and `save` are specified by pending specs in
-> [BuildScriptSpec](src/test/kotlin/cash/buildscript/BuildScriptSpec.kt) and are not implemented yet. Nothing is
-> published.
+Every example here is covered by [BuildScriptSpec](src/test/kotlin/cash/buildscript/BuildScriptSpec.kt). Nothing is published yet: build it from this repository.
 
 ## Dependencies
 
@@ -184,6 +181,16 @@ Pinning or removing what is not declared fails
 script.remove("com.example:not-there")
 ```
 
+Each failure is a `BuildScriptFailure` and leaves the script as it was
+
+| Failure | When |
+| --- | --- |
+| `ConflictingVersion` | `add` names something declared at a different version |
+| `UndeclaredDependency`, `UndeclaredPlugin` | `pin` or `remove` names something the script does not declare |
+| `MissingVersion` | `pin` is given no version, or the plugin is declared without one |
+| `VersionInCatalog` | `pin` is given a version catalog accessor |
+| `UnreadableDependency` | a string has none of the shapes, or its version is given twice |
+
 ## What Is Listed
 
 Only what the library models. These stay in the script as written and are left out of the lists
@@ -195,6 +202,15 @@ implementation("com.example:tool:1.0:all@zip")
 kotlin("jvm") version kotlinVersion
 ```
 
+Pinning a module also changes the version of its declarations with a classifier or an extension
+
 ## Version Catalogs
 
-Versions in `libs.versions.toml` are not changed. Pinning a dependency declared as `libs.okio` fails and says so.
+`libs.versions.toml` is not read or changed, so the library does not know which module `libs.okio` is
+
+```kotlin
+script.pin("libs.okio", version = "3.19.0")              // fails: VersionInCatalog
+script.pin("com.squareup.okio:okio", version = "3.19.0") // fails: UndeclaredDependency, when only libs.okio is declared
+```
+
+Change the version in the catalog

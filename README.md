@@ -123,13 +123,17 @@ parses the script and `rewritten()` returns the new text.
 | --- | --- |
 | `DependencyAdder` | Adds declarations to the top-level `dependencies` block, after the last one on the same configuration |
 | `DependencyRemover` | Removes declarations, matched by `group:name` or by accessor, from one configuration or all |
+| `DependencyVersionMutator` | Changes the version of every declaration of a module, keeping a classifier, an `@ext`, wrappers and trailing blocks |
+| `PluginAdder` | Adds entries to the top-level `plugins` block, creating it when the script has none |
+| `PluginRemover` | Removes entries from the top-level `plugins` block, matched by plugin id or by accessor |
 | `PluginVersionMutator` | Changes plugin versions in the top-level `plugins` block |
 
 `DependenciesMutator` also keeps `platform()`, `enforcedPlatform()` and `testFixtures()` around a dependency
-it rewrites; upstream drops them.
+it rewrites; upstream drops them. `DependencyAdder` and `DependencyRemover` take a string literal that starts
+with a colon, such as `:core`, as a project path.
 
-The [`build-script`](build-script/README.md) module is a planned layer over these recipes. It has a README and
-pending specs, and no implementation yet.
+The [`build-script`](build-script/README.md) module is a layer over these recipes: a `BuildScript` is opened
+from a file, lists the dependencies and plugins it declares, and offers `add`, `pin`, `remove` and `save`.
 
 ### Gradle build scans
 

@@ -7,14 +7,15 @@ import cash.buildscript.DependencyModifier.Unmodified
 import cash.grammar.kotlindsl.parse.KotlinParseException
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
-import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.attribute.FileTime
+import java.time.Instant
 
-// Specs for the object layer. A spec stays @Disabled("pending") until it is written.
+// Specs for the object layer.
 //
 // Wording: a name in CamelCase (ExternalModuleDependency, ModuleVersion) is a type in the layer. A capitalized
 // word that is not a type (Group, Name, Version Catalog) is a domain term. Kotlin does not allow a period or a
@@ -42,6 +43,17 @@ internal class BuildScriptSpec {
       plugins {
         application
         kotlin("jvm") version "2.2.0"
+      }
+    """.trimIndent()
+
+  private val onTwoConfigurations =
+    """
+      dependencies {
+        implementation("com.squareup.okio:okio:3.18.2")
+        implementation(libs.okhttp)
+        implementation(project(":core"))
+        testImplementation("com.squareup.okio:okio:3.18.2")
+        testImplementation(libs.okhttp)
       }
     """.trimIndent()
 
@@ -708,19 +720,98 @@ internal class BuildScriptSpec {
 
   @Nested inner class `removing a Dependency` {
 
-    @Disabled("pending") @Test fun `removes the declaration and its line`() {}
+    @Test fun `removes the declaration and its line`() {
+      val script = open(twoDependencies)
 
-    @Disabled("pending") @Test fun `matches on the Group and the Name, whatever the Version`() {}
+      script.remove("org.junit.jupiter:junit-jupiter")
 
-    @Disabled("pending") @Test fun `removes from the named Configuration only`() {}
+      assertThat(script.source).isEqualTo(
+        """
+          dependencies {
+            implementation("com.squareup.okio:okio:3.18.2")
+          }
+        """.trimIndent()
+      )
+      assertThat(script.dependencies).hasSize(1)
+    }
 
-    @Disabled("pending") @Test fun `removes from every Configuration when none is named`() {}
+    @Test fun `matches on the Group and the Name, whatever the Version`() {
+      val fromString = open(twoDependencies)
+      val fromParts = open(twoDependencies)
 
-    @Disabled("pending") @Test fun `removes a CatalogDependency`() {}
+      fromString.remove("com.squareup.okio:okio:9.9.9")
+      fromParts.remove(ExternalModuleDependency(implementation, ModuleVersion(okio, UnspecifiedVersion)))
 
-    @Disabled("pending") @Test fun `removes a ProjectDependency`() {}
+      assertThat(fromString.source).doesNotContain("okio")
+      assertThat(fromParts.source).isEqualTo(fromString.source)
+    }
 
-    @Disabled("pending") @Test fun `fails with UndeclaredDependency when it is not declared`() {}
+    @Test fun `removes from the named Configuration only`() {
+      val script = open(onTwoConfigurations)
+
+      script.remove("com.squareup.okio:okio", configuration = "testImplementation")
+      script.remove(CatalogDependency(implementation, TypeSafeAccessor("libs.okhttp")))
+
+      assertThat(script.source).isEqualTo(
+        """
+          dependencies {
+            implementation("com.squareup.okio:okio:3.18.2")
+            implementation(project(":core"))
+            testImplementation(libs.okhttp)
+          }
+        """.trimIndent()
+      )
+    }
+
+    @Test fun `removes from every Configuration when none is named`() {
+      val script = open(onTwoConfigurations)
+
+      script.remove("com.squareup.okio:okio")
+
+      assertThat(script.source).isEqualTo(
+        """
+          dependencies {
+            implementation(libs.okhttp)
+            implementation(project(":core"))
+            testImplementation(libs.okhttp)
+          }
+        """.trimIndent()
+      )
+    }
+
+    @Test fun `removes a CatalogDependency`() {
+      val script = open(onTwoConfigurations)
+
+      script.remove("libs.okhttp")
+
+      assertThat(script.dependencies.filterIsInstance<CatalogDependency>()).isEmpty()
+      assertThat(script.source).doesNotContain("libs.okhttp")
+    }
+
+    @Test fun `removes a ProjectDependency`() {
+      val script = open(onTwoConfigurations)
+
+      script.remove(":core")
+
+      assertThat(script.dependencies.filterIsInstance<ProjectDependency>()).isEmpty()
+      assertThat(script.source).doesNotContain("project(")
+    }
+
+    @Test fun `fails with UndeclaredDependency when it is not declared`() {
+      val script = open(onTwoConfigurations)
+
+      assertThatThrownBy { script.remove("com.example:not-there") }
+        .isInstanceOf(UndeclaredDependency::class.java)
+        .hasMessageContaining("com.example:not-there")
+      assertThatThrownBy { script.remove("libs.absent") }.isInstanceOf(UndeclaredDependency::class.java)
+      assertThatThrownBy { script.remove(":absent") }.isInstanceOf(UndeclaredDependency::class.java)
+      // Declared, but not on the Configuration that is named.
+      assertThatThrownBy { script.remove(":core", configuration = "testImplementation") }
+        .isInstanceOf(UndeclaredDependency::class.java)
+        .hasMessageContaining("on testImplementation")
+      assertThatThrownBy { script.remove("no shape") }.isInstanceOf(UnreadableDependency::class.java)
+      assertThat(script.source).isEqualTo(onTwoConfigurations)
+    }
   }
 
   @Nested inner class `adding a PluginDependency` {
@@ -891,9 +982,40 @@ internal class BuildScriptSpec {
 
   @Nested inner class `removing a PluginDependency` {
 
-    @Disabled("pending") @Test fun `removes the entry and its line`() {}
+    @Test fun `removes the entry and its line`() {
+      val script = open(
+        """
+          plugins {
+            application
+            kotlin("jvm") version "2.2.0"
+            alias(libs.plugins.shadow)
+          }
+        """.trimIndent()
+      )
 
-    @Disabled("pending") @Test fun `fails with UndeclaredPlugin when it is not declared`() {}
+      script.remove(Plugin(PluginId("org.jetbrains.kotlin.jvm"), RequiredVersion("2.2.0")))
+      script.remove(CatalogPlugin(TypeSafeAccessor("libs.plugins.shadow")))
+
+      assertThat(script.source).isEqualTo(
+        """
+          plugins {
+            application
+          }
+        """.trimIndent()
+      )
+      assertThat(script.pluginDependencies).containsExactly(Plugin(PluginId("application")))
+    }
+
+    @Test fun `fails with UndeclaredPlugin when it is not declared`() {
+      val script = open(twoPlugins)
+
+      assertThatThrownBy { script.remove(Plugin(PluginId("com.example.plugin"))) }
+        .isInstanceOf(UndeclaredPlugin::class.java)
+        .hasMessageContaining("com.example.plugin")
+      assertThatThrownBy { script.remove(CatalogPlugin(TypeSafeAccessor("libs.plugins.shadow"))) }
+        .isInstanceOf(UndeclaredPlugin::class.java)
+      assertThat(script.source).isEqualTo(twoPlugins)
+    }
   }
 
   @Nested inner class `naming a plugin by its PluginId` {
@@ -924,26 +1046,181 @@ internal class BuildScriptSpec {
       assertThat(script.source).contains("""kotlin("jvm") version "2.2.21"""")
     }
 
-    @Disabled("pending") @Test fun `removes a Plugin from a PluginId alone, whatever its Version`() {}
+    @Test fun `removes a Plugin from a PluginId alone, whatever its Version`() {
+      val script = open(twoPlugins)
+
+      script.remove(PluginId("org.jetbrains.kotlin.jvm"))
+
+      assertThat(script.pluginDependencies).containsExactly(Plugin(PluginId("application")))
+    }
   }
 
   @Nested inner class `keeping the rest of the script as written` {
 
-    @Disabled("pending") @Test fun `leaves every line an operation did not change byte-for-byte`() {}
+    @Test fun `leaves every line an operation did not change byte-for-byte`() {
+      // Given a script with its own spacing, comments and a block the layer has no part in
+      val script = open(
+        """
+          import java.time.Instant
 
-    @Disabled("pending") @Test fun `leaves a declaration the layer does not model as written`() {}
+          plugins {
+              application   // runs the app
+              kotlin("jvm")   version   "2.2.0"
+          }
 
-    @Disabled("pending") @Test fun `leaves the script unchanged when an operation fails`() {}
+          /* built at */ val builtAt = Instant.now()
+
+          dependencies {
+              implementation( "com.squareup.okio:okio:3.9.0" )  // io
+              // tests
+              testImplementation("org.junit.jupiter:junit-jupiter:6.1.3")
+          }
+
+          tasks.test { useJUnitPlatform() }
+        """.trimIndent() + "\n"
+      )
+
+      // When
+      script.add("com.squareup.okhttp3:okhttp:5.5.1")
+      script.pin("com.squareup.okio:okio:3.18.2")
+      script.pin(PluginId("org.jetbrains.kotlin.jvm"), version = "2.2.21")
+      script.remove("org.junit.jupiter:junit-jupiter")
+
+      // Then
+      assertThat(script.source).isEqualTo(
+        """
+          import java.time.Instant
+
+          plugins {
+              application   // runs the app
+              kotlin("jvm")   version   "2.2.21"
+          }
+
+          /* built at */ val builtAt = Instant.now()
+
+          dependencies {
+              implementation( "com.squareup.okio:okio:3.18.2" )  // io
+              implementation("com.squareup.okhttp3:okhttp:5.5.1")
+              // tests
+          }
+
+          tasks.test { useJUnitPlatform() }
+        """.trimIndent() + "\n"
+      )
+    }
+
+    @Test fun `leaves a declaration the layer does not model as written`() {
+      val unmodelled =
+        """
+          val kotlinVersion = "2.2.0"
+
+          plugins {
+            kotlin("jvm") version kotlinVersion
+          }
+
+          dependencies {
+            implementation(files("libs/local.jar"))
+            implementation(projects.core)
+            implementation("com.example:tool:1.0:all@zip")
+            implementation("com.squareup.okio:okio:3.9.0")
+          }
+        """.trimIndent()
+      val script = open(unmodelled)
+
+      script.add("com.squareup.okhttp3:okhttp:5.5.1")
+      script.add(PluginId("application"))
+      script.pin("com.squareup.okio:okio:3.18.2")
+
+      assertThat(script.source.lines()).containsAll(unmodelled.lines().filterNot { "okio" in it })
+      assertThat(script.source.lines()).hasSize(unmodelled.lines().size + 2)
+    }
+
+    @Test fun `leaves the script unchanged when an operation fails`() {
+      val source = twoPlugins + "\n\n" + twoDependencies + "\n"
+      val script = open(source)
+
+      assertThatThrownBy { script.add("com.squareup.okio:okio:3.19.0") }.isInstanceOf(ConflictingVersion::class.java)
+      assertThatThrownBy { script.add("not a dependency") }.isInstanceOf(UnreadableDependency::class.java)
+      assertThatThrownBy { script.pin("com.example:not-there:1.0") }.isInstanceOf(UndeclaredDependency::class.java)
+      assertThatThrownBy { script.pin(PluginId("application"), version = "1.0") }.isInstanceOf(MissingVersion::class.java)
+      assertThatThrownBy { script.remove(PluginId("com.example.plugin")) }.isInstanceOf(UndeclaredPlugin::class.java)
+      script.save()
+
+      assertThat(script.source).isEqualTo(source)
+      assertThat(Files.readString(directory.resolve("build.gradle.kts"))).isEqualTo(source)
+      assertThat(script.dependencies).hasSize(2)
+      assertThat(script.pluginDependencies).hasSize(2)
+    }
   }
 
   @Nested inner class `saving` {
 
-    @Disabled("pending") @Test fun `writes the source back to the file it was opened from`() {}
+    @Test fun `writes the source back to the file it was opened from`() {
+      val script = open(twoDependencies)
+      val file = directory.resolve("build.gradle.kts")
 
-    @Disabled("pending") @Test fun `leaves the file untouched when nothing has changed`() {}
+      script.add("com.squareup.okhttp3:okhttp:5.5.1")
 
-    @Disabled("pending") @Test fun `applies several operations in the order they were called`() {}
+      // Nothing is written until save.
+      assertThat(Files.readString(file)).isEqualTo(twoDependencies)
+      script.save()
+      assertThat(Files.readString(file)).isEqualTo(script.source).contains("okhttp")
+    }
 
-    @Disabled("pending") @Test fun `reads the same parts after saving and opening again`() {}
+    @Test fun `leaves the file untouched when nothing has changed`() {
+      val script = open(twoDependencies)
+      val file = directory.resolve("build.gradle.kts")
+      val longAgo = FileTime.from(Instant.parse("2020-01-01T00:00:00Z"))
+      Files.setLastModifiedTime(file, longAgo)
+
+      script.save()
+      script.add("com.squareup.okio:okio:3.18.2") // already declared
+      script.save()
+
+      assertThat(Files.getLastModifiedTime(file)).isEqualTo(longAgo)
+    }
+
+    @Test fun `applies several operations in the order they were called`() {
+      val script = open(twoPlugins + "\n\n" + twoDependencies + "\n")
+
+      script.add("com.squareup.okhttp3:okhttp", version = "5.5.0")
+      script.pin("com.squareup.okhttp3:okhttp", version = "5.5.1")
+      script.add("org.assertj:assertj-core:3.27.7", configuration = "testImplementation")
+      script.remove("com.squareup.okio:okio")
+      script.add(PluginId("org.graalvm.buildtools.native"), version = "1.1.18")
+      script.remove(PluginId("application"))
+      script.save()
+
+      assertThat(Files.readString(directory.resolve("build.gradle.kts"))).isEqualTo(
+        """
+          plugins {
+            kotlin("jvm") version "2.2.0"
+            id("org.graalvm.buildtools.native") version "1.1.18"
+          }
+
+          dependencies {
+            implementation("com.squareup.okhttp3:okhttp:5.5.1")
+            testImplementation("org.junit.jupiter:junit-jupiter:6.1.3")
+            testImplementation("org.assertj:assertj-core:3.27.7")
+          }
+        """.trimIndent() + "\n"
+      )
+    }
+
+    @Test fun `reads the same parts after saving and opening again`() {
+      val script = open(twoPlugins + "\n\n" + twoDependencies + "\n")
+      script.add("libs.okhttp")
+      script.add(":core", configuration = "api")
+      script.add("tools.jackson:jackson-bom:3.3.0", configuration = "api", modifier = Platform)
+      script.add(CatalogPlugin(TypeSafeAccessor("libs.plugins.shadow")))
+      script.pin("com.squareup.okio:okio:3.19.0")
+      script.save()
+
+      val reopened = BuildScript.open(directory.resolve("build.gradle.kts"))
+
+      assertThat(reopened.source).isEqualTo(script.source)
+      assertThat(reopened.dependencies).isEqualTo(script.dependencies).hasSize(5)
+      assertThat(reopened.pluginDependencies).isEqualTo(script.pluginDependencies).hasSize(3)
+    }
   }
 }

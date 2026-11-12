@@ -3,10 +3,14 @@
 ## Unreleased (this fork)
 * [feat]: `DependencyAdder` adds declarations to the top-level `dependencies` block.
 * [feat]: `DependencyRemover` removes declarations from the top-level `dependencies` block.
+* [feat]: `DependencyVersionMutator` changes the version of every declaration of a module.
+* [feat]: `PluginAdder` adds entries to the top-level `plugins` block.
+* [feat]: `PluginRemover` removes entries from the top-level `plugins` block.
 * [feat]: `PluginVersionMutator` changes plugin versions in the top-level `plugins` block.
+* [feat]: `DependencyAdder` and `DependencyRemover` take a project path such as `:core`.
 * [fix]: `DependenciesMutator` keeps `platform()`, `enforcedPlatform()` and `testFixtures()` when it rewrites a dependency.
 * [chore]: bump the foojay plugin in build-logic to 1.0.0 so the build configures on Gradle 9.
-* [docs]: add the `build-script` module with a README and pending specs for a planned layer over the recipes.
+* [feat]: the `build-script` module: a `BuildScript` lists a script's dependencies and plugins and offers `add`, `pin`, `remove` and `save`.
 
 ## Version 0.26
 * [feat]: support parsing multi-dollar string prefixes

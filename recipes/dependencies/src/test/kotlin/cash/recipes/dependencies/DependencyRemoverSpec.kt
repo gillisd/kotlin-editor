@@ -376,4 +376,36 @@ internal class DependencyRemoverSpec {
       }
     }
   }
+
+  @Nested inner class `removing a project dependency` {
+
+    @Test fun `matches a string literal that starts with a colon against the whole project path`() {
+      // Given
+      val buildScript =
+        """
+          dependencies {
+            implementation(project(":libs"))
+            implementation(project(":libs:network"))
+            testImplementation(testFixtures(project(":libs:network")))
+            implementation("libs:network:1.0")
+          }
+        """.trimIndent()
+
+      // When
+      val remover = DependencyRemover.of(
+        buildScript,
+        listOf(Removal(StringLiteral(":libs:network"))),
+      )
+
+      // Then neither the parent project nor the module of the same words is touched
+      assertThat(remover.rewritten()).isEqualTo(
+        """
+          dependencies {
+            implementation(project(":libs"))
+            implementation("libs:network:1.0")
+          }
+        """.trimIndent()
+      )
+    }
+  }
 }

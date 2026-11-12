@@ -32,8 +32,9 @@ public class DependencyRemover private constructor(
 ) : Mutator(input, tokens, errorListener) {
 
   /**
-   * One dependency to remove: [dependency] is `group:name` (no version) or an accessor such as `libs.okhttp`. With no
-   * [configuration], it is removed from every configuration.
+   * One dependency to remove: [dependency] is `group:name` (no version), an accessor such as `libs.okhttp`, or, as a
+   * string literal that starts with a colon, a project path such as `:core`. With no [configuration], it is removed
+   * from every configuration.
    */
   public data class Removal @JvmOverloads constructor(
     public val dependency: Transform.Element,
@@ -149,12 +150,14 @@ public class DependencyRemover private constructor(
 
   public companion object {
     private val modulePattern = Regex("""[^\s:"]+:[^\s:"]+""")
+    private val projectPathPattern = Regex("""(:[^\s:"]+)+""")
     private val accessorPattern = Regex("""[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)+""")
     private val configurationPattern = Regex("""[A-Za-z_][A-Za-z0-9_]*""")
 
     /** `group:name` for a module version string (version dropped, quotes ignored), or the accessor itself. */
     private fun withoutVersion(rendered: String): String {
       val text = rendered.removeSurrounding("\"")
+      if (text.startsWith(':')) return text // a project path is matched whole
       return if (':' in text) text.split(':').take(2).joinToString(":") else text
     }
 
@@ -175,8 +178,11 @@ public class DependencyRemover private constructor(
           require(configurationPattern.matches(it)) { "Invalid configuration name: '$it'" }
         }
         when (val dependency = removal.dependency) {
-          is Transform.Element.StringLiteral -> require(modulePattern.matches(dependency.value)) {
-            "Invalid module: '${dependency.value}'. Expected 'group:name' (no version)."
+          is Transform.Element.StringLiteral -> require(
+            modulePattern.matches(dependency.value) || projectPathPattern.matches(dependency.value)
+          ) {
+            "Invalid module: '${dependency.value}'. Expected 'group:name' (no version), " +
+              "or a project path such as ':core'."
           }
           is Transform.Element.Accessor -> require(accessorPattern.matches(dependency.value)) {
             "Invalid accessor: '${dependency.value}'. Expected something like 'libs.foo.bar'."
